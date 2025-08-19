@@ -13,6 +13,7 @@ import subprocess
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import Select
 from selenium.webdriver.common.action_chains import ActionChains
+from selenium.webdriver.common.keys import Keys
 import time
 import datetime
 import os
@@ -69,12 +70,7 @@ def open_browser():
                 # determine which browser driver to use by subprocess driver --help
                 result = subprocess.run([args.driver_path, '--help'], capture_output=True, text=True)
                 if result.returncode == 0:
-                    if 'Chrome' in result.stdout:
-                        print("Using Chrome driver")
-                        from selenium.webdriver.chrome.service import Service
-                        service = Service(args.driver_path)
-                        browser = webdriver.Chrome(service=service)
-                    elif 'msedge' in result.stdout:
+                    if 'msedge' in result.stdout:
                         print("Using Edge driver")
                         from selenium.webdriver.edge.service import Service
                         service = Service(args.driver_path)
@@ -84,6 +80,11 @@ def open_browser():
                         from selenium.webdriver.firefox.service import Service
                         service = Service(args.driver_path)
                         browser = webdriver.Firefox(service=service)
+                    elif 'Chrome' in result.stdout:
+                        print("Using Chrome driver")
+                        from selenium.webdriver.chrome.service import Service
+                        service = Service(args.driver_path)
+                        browser = webdriver.Chrome(service=service)
                     else:
                         print("Unknown browser driver")
                         raise FileNotFoundError("Unknown browser driver")
@@ -104,12 +105,12 @@ def open_browser():
             if args.browser == "Edge":
                 print("Using Edge WebDriver")
                 browser = webdriver.Edge()
-            elif args.browser == "Chrome":
-                print("Using Chrome WebDriver")
-                browser = webdriver.Chrome()
             elif args.browser == "Firefox":
                 print("Using Firefox WebDriver")
                 browser = webdriver.Firefox()
+            elif args.browser == "Chrome":
+                print("Using Chrome WebDriver")
+                browser = webdriver.Chrome()
             else: # no browser flag provided
                 raise FileNotFoundError("No custom driver path provided and no browser flag provided. Falling back to default.")
         
@@ -122,15 +123,15 @@ def open_browser():
         except Exception as e:
             print(f"Failed to initialize Edge WebDriver: {e}")
             try:
-                # Chrome
-                print("Trying to initialize Chrome WebDriver...")
-                browser = webdriver.Chrome()
+                # Firefox
+                print("Trying to initialize Firefox WebDriver...")
+                browser = webdriver.Firefox()
             except Exception as e:
-                print(f"Failed to initialize Chrome WebDriver: {e}")
+                print(f"Failed to initialize Firefox WebDriver: {e}")
                 try:
-                    # Firefox
-                    print("Trying to initialize Firefox WebDriver...")
-                    browser = webdriver.Firefox()
+                    # Chrome
+                    print("Trying to initialize Chrome WebDriver...")
+                    browser = webdriver.Chrome()
                 except Exception as e:
                     print(f"Failed to initialize Firefox WebDriver: {e}")
                     sys.exit(1)
@@ -269,7 +270,7 @@ def show_msg_on_driver(txt1, timeout_second, txt2)-> None:
     
 def getdatetime()-> str:
     now_year=str(int(datetime.datetime.now().strftime("%Y"))-1911)
-    now_date=datetime.datetime.now().strftime("/%m/%d %H:%M:%S")
+    now_date=datetime.datetime.now().strftime("%m%d-%H%M%S")
     return now_year+now_date
 
 def click_element(element: webdriver.remote.webelement.WebElement) -> None:
@@ -324,10 +325,11 @@ def autoLogin(user_ID):
     driver.set_window_position(20, 20)
     driver.set_window_size(1000, 1000)
     # login page
-    driver.get("https://stockservices.tdcc.com.tw/evote/login/shareholder.html")
+    driver.get("https://stockservices.tdcc.com.tw/evote/login/shareholder.html?language=")  # ensure it is TW
     driver.find_element(By.NAME,"pageIdNo").send_keys(user_ID)
     time.sleep(1*time_speed)
-    driver.find_element(By.NAME,"caType").send_keys("券商網路下單憑證")
+    #driver.find_element(By.NAME,"caType").send_keys("券商網路下單憑證")
+    driver.find_element(By.NAME,"caType").send_keys(Keys.ARROW_DOWN)  # select the first option
     time.sleep(1*time_speed)
     driver.find_element(By.ID,'loginBtn').click()
     # click_element(driver.find_element(By.ID,'loginBtn'))
@@ -709,18 +711,28 @@ def screenshot(user_id,info):
         if screenshot_mode == 1:
             if not os.path.exists(base_path+str(user_id)):
                 os.makedirs(base_path+str(user_id))
-            driver.save_screenshot(base_path+str(user_id)+"/"+ info[0] +"_"+ info[1].replace("*","") +".png")
+            if not os.path.exists(base_path+str(user_id)+"/"+ info[0] +"_"+ info[1].replace("*","") +".png"):
+                driver.save_screenshot(base_path+str(user_id)+"/"+ info[0] +"_"+ info[1].replace("*","") +".png")
+            else:
+                # print(base_path+str(user_id)+"/"+ info[0] +"_"+ info[1].replace("*","") +f"_{getdatetime()}.png")
+                driver.save_screenshot(base_path+str(user_id)+"/"+ info[0] +"_"+ info[1].replace("*","") +f"_{getdatetime()}.png")
         elif screenshot_mode == 2:
             if not os.path.exists(base_path):
                 os.makedirs(base_path)
             stock_account_id = info[2]
-            filename = f"{info[0]}_{info[1].replace('*','')}_{stock_account_id}.png"
-            driver.save_screenshot(base_path +"/all/"+ filename)
+            filename = f"{info[0]}_{info[1].replace('*','')}_{stock_account_id}"
+            if not os.path.exists(base_path +"/all/"+ filename + ".png"):
+                driver.save_screenshot(base_path +"/all/"+ filename + ".png")
+            else:
+                driver.save_screenshot(base_path +"/all/"+ filename + f"_{getdatetime()}.png")
         elif screenshot_mode == 3:
             if not os.path.exists(base_path):
                 os.makedirs(base_path)
-            filename = f"{info[0]}_{info[1].replace('*','')}_{user_id}.png"
-            driver.save_screenshot(base_path+"/all/" + filename)
+            filename = f"{info[0]}_{info[1].replace('*','')}_{user_id}"
+            if not os.path.exists(base_path +"/all/"+ filename + ".png"):
+                driver.save_screenshot(base_path +"/all/"+ filename + ".png")
+            else:
+                driver.save_screenshot(base_path +"/all/"+ filename + f"_{getdatetime()}.png")
         driver.execute_script("document.body.style.zoom = '100%'")
         return 0
     except Exception as e:
@@ -762,8 +774,12 @@ def auto_screenshot(user_id, stock_id):
             except IndexError:
                 time.sleep(2)
                 
-        # click search button(should be only one after search)
-        for i in driver.find_elements(By.TAG_NAME,'tr'):
+        # click search button(may have more than one after search)
+        items = driver.find_elements(By.TAG_NAME,'tr')
+        items = items[1:-1]
+        #sort by date
+        items.sort(key=lambda x: x.find_elements(By.TAG_NAME,'td')[1].find_elements(By.TAG_NAME,'div')[0].text, reverse=True)
+        for i in items:
             if(debug>=5):
                 print(i.text)
             if "修改" in i.text:
@@ -809,7 +825,7 @@ def auto_screenshot(user_id, stock_id):
                 voteinfo.append("unknown")
         except Exception as e:
             voteinfo.append("unknown")
-        ret = screenshot(user_id, voteinfo)
+        ret = screenshot(user_id, voteinfo)          #####################################why can't save correctly with datetime ##############################################
         if ret == 0:
             try:
                 voteinfolist[user_id].remove(stock_id)
@@ -1275,7 +1291,7 @@ if len(list(voteinfolist.keys()))>0:
     if check=="Y":
         load_settings() # for screenshot mode
         print("--------- continue take screenshot---------")
-        driver = webdriver.Chrome() # selenium auto install
+        driver = open_browser()
         for id in voteinfolist.keys():
             print("ID: ",id)
             print("Stocks: ",voteinfolist[id])
