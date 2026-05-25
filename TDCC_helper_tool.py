@@ -401,6 +401,7 @@ def autoLogin(user_ID):
             pass
         
         # get body's text
+        driver.implicitly_wait(30)
         if driver.find_element(By.TAG_NAME,'body').text.find("系統維護中") != -1:
             # time between 00:00~7:00
             if datetime.datetime.now().hour < 7:
@@ -445,7 +446,7 @@ def voting():
         time.sleep(1) # slower but reduce possibility to be detected as robot
         #### 投票已完成，回清單
         if "投票已完成" in driver.find_element(By.TAG_NAME,'table').text:
-            #print("投票已完成")
+            print("投票已完成")
             time.sleep(3*time_speed)
             driver.find_element(By.CSS_SELECTOR,'button[onclick="doProcess();"]').click()
             # click_element(driver.find_element(By.CSS_SELECTOR,'button[onclick="doProcess();"]'))
@@ -463,8 +464,8 @@ def voting():
                         time.sleep(2*time_speed)
                         #break
                     except Exception as e:
-                        #print("error: ",e)
-                        #continue
+                        print("error: ",e)
+                        continue
                         pass
             case "opposite":
                 #while(True):
@@ -475,8 +476,8 @@ def voting():
                         time.sleep(2*time_speed)
                         #break
                     except Exception as e:
-                        #print("error: ",e)
-                        #continue
+                        print("error: ",e)
+                        continue
                         pass
             case "abstain":
                 #while(True):
@@ -487,8 +488,8 @@ def voting():
                         time.sleep(2*time_speed)
                         #break
                     except Exception as e:
-                        #print("error: ",e)
-                        #continue
+                        print("error: ",e)
+                        continue
                         pass
         try:
             #driver.find_elements(By.XPATH,'//table[@class="o-table--card c-cardTable c-motionlist"]/tbody/tr')
@@ -497,7 +498,7 @@ def voting():
                 # select all rows of vote
                 ## for all /html/body/div[1]/form/table[3]/tbody/tr which has input in their children
                 for i in driver.find_elements(By.XPATH,'//td/input[@type="radio"]/../..'):
-                    #print(i.text)
+                    print(i.text)
                     if len(i.find_elements(By.TAG_NAME,'input'))==0: # not a vote
                         continue
 
@@ -623,6 +624,7 @@ def voting():
                     # wait for 5 minutes
                     continue
         except:
+            print(__LINE__, "unhandled exception, but continue anyway")
             pass
     return
 
@@ -688,19 +690,30 @@ def screenshot(user_id,info):
     """
     save screenshot to the appropriate directory based on screenshot_mode.
     info[0]: stock_id, info[1]: stock_name, info[2]: stock_account_id
-    Returns: 0 for success, 1 for failure
+    Returns: 0 for success, 1 for failure, 2 for egift
     """
     global base_path, screenshot_mode
     try:
         driver.execute_script("document.body.style.zoom = '120%'")
         # adjust the window size
+        tmp_cnt=0
         while(True):
             try:
                 driver.find_element(By.CSS_SELECTOR,'div[class="u-width--100 u-t_align--right"]')
+                tmp_cnt=0
                 break
             except:
-                time.sleep(1)
-                continue
+                try:
+                    if driver.find_element(By.CSS_SELECTOR,'li.c-hint:nth-child(1)').get_property("innerText").find("eGift電子紀念品") != -1:
+                        print("eGift電子紀念品，無法截圖")
+                        return 2
+                except:
+                    tmp_cnt+=1
+                    time.sleep(1)
+                    if tmp_cnt%8==0:
+                        print("Unhandled page layout, screenshot may be incorrect")
+                        return 1
+                    continue
         votedate_pic = driver.find_element(By.CSS_SELECTOR,'div[class="u-width--100 u-t_align--right"]')
         driver.set_window_size(516, votedate_pic.location['y']+votedate_pic.size['height']+370)
         # scroll to the top of the page
@@ -825,7 +838,7 @@ def auto_screenshot(user_id, stock_id):
                 voteinfo.append("unknown")
         except Exception as e:
             voteinfo.append("unknown")
-        ret = screenshot(user_id, voteinfo)          #####################################why can't save correctly with datetime ##############################################
+        ret = screenshot(user_id, voteinfo)
         if ret == 0:
             try:
                 voteinfolist[user_id].remove(stock_id)
@@ -834,6 +847,13 @@ def auto_screenshot(user_id, stock_id):
             except Exception as e:
                 print(f"Failed to update voteinfolist: {e}")
                 return 1
+        elif ret == 2:
+            print(f"{voteinfo[0]} {voteinfo[1]} 為eGift電子紀念品，無法截圖")
+            voteinfolist[user_id].remove(stock_id)
+            #temp pop to the end, later will save to egift.txt ##################################################################### TODO ############
+            voteinfolist[user_id].append(stock_id)
+            write_voteinfolist(voteinfolist)
+            return 2
         else:
             print(f"{voteinfo[0]} {voteinfo[1]} 截圖失敗")
             return 1
