@@ -2,13 +2,10 @@
 # coding: utf-8
 # author: DavidChou
 # repository: https://github.com/DavidChou23/TDCC_evote_helper
-# date: 2025/7/19
+# date: 2026/5/25
 
 debug=0
 from selenium import webdriver
-# from selenium.webdriver.edge.service import Service --> import later, in case
-# from selenium.webdriver.chrome.service import Service
-# from selenium.webdriver.firefox.service import Service
 import subprocess
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import Select
@@ -190,7 +187,6 @@ with open('./statement.html', 'w', encoding='utf-8') as f:
     <p>This script is only for assisting shareholders to complete the voting process in advance</p>
     <p>Voting content can be modified at any time without affecting the shareholder's intention</p>
     <p>This script is not responsible for any consequences caused by the use of this script</p>
-    <!-- <p>For more information, please visit <a href="">your website link here</a></p> -->
     <br>
     <p><strong> please enter the command in the black control window. The voting content can be modified at any time without affecting the shareholder's intention</strong></p>
 </body>
@@ -381,6 +377,7 @@ def autoLogin(user_ID):
         except:
             pass
         try:
+            # what is it for?
             for element in driver.find_elements(By.CSS_SELECTOR,'div[id="tabs1"]'):
                 driver.execute_script("arguments[0].setAttribute('class','tabs-block block color-b shadow show active')", element)
             for g in driver.find_elements(By.CSS_SELECTOR,'a[onclick="go();"]'):
