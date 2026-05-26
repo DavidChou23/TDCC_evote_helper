@@ -1111,13 +1111,14 @@ def read_program_setting():
             hash_value = line.split(":::")[-1].replace("\n","").replace("\ufeff","")
     # check hash value
     content= str(screenshot_mode) + "|/|" + str(time_speed*2) + "|/|" + "@".join(shareholderIDs)
+    print(content)
     # hash the content
     hash_object = hashlib.sha256(content.encode())
     hex_dig = hash_object.hexdigest()
     if hash_value != hex_dig:
         print("program_setting.conf file is corrupted(hash not match), please restart the program and reconfigure")
-        # print("hash value: ", hash_value)
-        # print("calculated hash value: ", hex_dig)
+        print("hash value: ", hash_value)
+        print("calculated hash value: ", hex_dig)
         if os.path.exists('./program_setting.conf.bak'):
             os.remove('./program_setting.conf.bak')
         os.rename('./program_setting.conf', './program_setting.conf.bak')
@@ -1125,6 +1126,7 @@ def read_program_setting():
         print("please reconfigure the program setting")
         print("press Enter to exit")
         sys.exit()
+    sys.exit()
 
 def vi_program_setting():
     global time_speed, shareholderIDs, screenshot_mode

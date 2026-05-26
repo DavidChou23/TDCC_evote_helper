@@ -24,13 +24,16 @@ from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException
 
-# Configure Logging
+
+if not os.path.exists("./log"):
+    os.makedirs("./log")
+# Configure Logging(with line numbers and timestamps)
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s [%(levelname)s] %(message)s',
+    format='%(asctime)s [%(levelname)s:%(lineno)d] %(message)s',
     handlers=[
         logging.StreamHandler(sys.stdout),
-        logging.FileHandler('tdcc_automation.log', encoding='utf-8')
+        logging.FileHandler(f'./log/tdcc_automation_{datetime.datetime.now().strftime("%Y%m%d")}.log', encoding='utf-8')
     ]
 )
 logger = logging.getLogger(__name__)
@@ -56,6 +59,7 @@ class TDCCAutomation:
         self.driver = None
         self.state = State.IDLE
         self.base_path = "./screenshots/"
+        self.tmp_download_path = "./tmp_downloads_tdcc_evote_helper/"
         self.time_speed = 1.0  # Default multiplier
         self.screenshot_mode = 1
         self.shareholder_ids = []
@@ -77,6 +81,9 @@ class TDCCAutomation:
         if not os.path.exists(self.base_path):
             os.makedirs(self.base_path)
             logger.info(f"Created base path: {self.base_path}")
+        if not os.path.exists(self.tmp_download_path):
+            os.makedirs(self.tmp_download_path)
+            logger.info(f"Created temp download path: {self.tmp_download_path}")
         
         # Change working directory to script location
         script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -110,7 +117,42 @@ class TDCCAutomation:
         if int(id_number[9]) != calculated_check_digit: 
             return 2
         return 0
+    
+    def check_login_as(self, user_id):
+        assert self.driver is not None, "WebDriver is not initialized for login check."
+        #debug
+        # assert user_id==self.current_user, f"check_login_as called with user_id {user_id} but current_user is {self.current_user}"
+        if user_id is None:
+            return False
 
+        #open a temp new tab to check if already logged in as user_id
+        logger.info(f"Checking if already logged in as {user_id}")
+        # self.driver.execute_script("window.open('');")
+        # self.driver.switch_to.window(self.driver.window_handles[-1])
+        # self.driver.get("https://stockservices.tdcc.com.tw/evote/login/shareholder.html?language=TW")
+        # # wait for page load
+        # try:
+        #     WebDriverWait(self.driver, 30).until(EC.presence_of_element_located((By.TAG_NAME, 'html')))
+        # except TimeoutException:
+        #     logger.error("Failed to load login page.")
+        #     return
+        
+        #check is it in page_source(exclude any "input" tag)
+        filtered_source = self.driver.page_source
+        for tag_name in ['input', 'textarea', 'select']:
+            for tag in self.driver.find_elements(By.TAG_NAME, tag_name):
+                filtered_source = filtered_source.replace(tag.get_attribute('outerHTML'), '')
+        if str(user_id) in filtered_source:
+            logger.info(f"Already logged in as {user_id}.")
+            self.current_user = user_id
+            # self.driver.close()
+            # self.driver.switch_to.window(self.driver.window_handles[0])
+            return True
+        # self.driver.close()
+        # self.driver.switch_to.window(self.driver.window_handles[0])
+        return False
+        
+        
     def load_configs(self):
         self.read_program_setting()
         self.read_vote_setting()
@@ -136,18 +178,18 @@ class TDCCAutomation:
                     else: data[key] = val
             
             # Verify Hash
-            content = f"{data.get('screenshot_mode', '1')}|/|{data.get('time_speed', '2')}|/|{'@'.join(data.get('shareholderIDs', '').split('|/|'))}"
+            content = f"{data.get('screenshot_mode', '1')}|/|{str(float(data.get('time_speed', '2')))}|/|{'@'.join(data.get('shareholderIDs', '').split('|/|'))}"
             if hashlib.sha256(content.encode()).hexdigest() != stored_hash:
                 logger.error("program_setting.conf hash mismatch!")
+                print(content)
+                logger.info(f"Expected hash: {stored_hash}")
+                logger.info(f"Actual hash: {hashlib.sha256(content.encode()).hexdigest()}")
                 # rename corrupted config for backup
                 if os.path.exists(config_path+".bak"):
                     os.remove(config_path+".bak")
                 os.rename(config_path, config_path + ".bak")
                 logger.warning("Corrupted program_setting.conf has been renamed to program_setting.conf.bak. Please reconfigure settings.")
-                input("Press Enter to Exit...")
-                os.remove("running.lock")
-                sys.exit(1)
-                return
+                self.exit(1)
 
             self.screenshot_mode = int(data.get('screenshot_mode', 1))
             self.time_speed = float(data.get('time_speed', 2)) / 2
@@ -179,15 +221,15 @@ class TDCCAutomation:
             content = f"{data.get('default','')}|/|{'#'.join(data.get('accept', '').split('|/|'))}|/|{'$'.join(data.get('opposite', '').split('|/|'))}|/|{'%'.join(data.get('abstain', '').split('|/|'))}|/|{data.get('manual_vote', '')}"
             if hashlib.sha256(content.encode()).hexdigest() != stored_hash:
                 logger.error("vote_setting.conf hash mismatch!")
+                logger.debug(f"Expected hash: {stored_hash}")
+                logger.debug(f"Actual hash: {hashlib.sha256(content.encode()).hexdigest()}")
                 # rename corrupted config for backup
                 if os.path.exists(config_path+".bak"):
                     os.remove(config_path+".bak")
                 os.rename(config_path, config_path + ".bak")
                 logger.warning("Corrupted vote_setting.conf has been renamed to vote_setting.conf.bak. Please reconfigure settings.")
-                input("Press Enter to Exit...")
-                os.remove("running.lock")
-                sys.exit(1)
-                return
+                self.exit(1)
+
             self.vote_settings['default'] = data.get('default', 'abstain')
             self.vote_settings['manual_vote'] = data.get('manual_vote') == 'True'
             self.vote_settings['accept'] = [k for k in data.get('accept', '').split('|/|') if k]
@@ -221,31 +263,60 @@ class TDCCAutomation:
         self.change_state(State.INITIALIZING)
         browser_type = self.args.browser
         driver_path = self.args.driver_path
+        if self.driver!= None:
+            logger.warning("WebDriver is already initialized. Skipping browser initialization.")
+            return
+        def build_browser_options(browser_name: str):
+            download_dir = os.path.abspath(self.tmp_download_path)
+            if browser_name in ("Edge", "Chrome"):
+                options = webdriver.EdgeOptions() if browser_name == "Edge" else webdriver.ChromeOptions()
+                prefs = {
+                    "download.default_directory": download_dir,
+                    "download.prompt_for_download": False,
+                    "download.directory_upgrade": True,
+                    "safebrowsing.enabled": True,
+                }
+                options.add_experimental_option("prefs", prefs)
+                return options
+
+            if browser_name == "Firefox":
+                from selenium.webdriver.firefox.options import Options
+
+                options = Options()
+                options.set_preference("browser.download.folderList", 2)
+                options.set_preference("browser.download.dir", download_dir)
+                options.set_preference("browser.helperApps.neverAsk.saveToDisk", "text/csv,application/csv,text/plain,application/octet-stream")
+                options.set_preference("pdfjs.disabled", True)
+                return options
+
+            return None
 
         try:
             # First try the specified driver path if provided
-            if not os.path.exists(driver_path):
-                logger.warning(f"Specified driver path does not exist: {driver_path}. Falling back to default logic.")
-                driver_path = None
-            if not os.access(driver_path, os.X_OK):
-                logger.warning(f"Specified driver path is not executable: {driver_path}. Falling back to default logic.")
-                driver_path = None
+            if driver_path!= None:
+                if not os.path.exists(driver_path):
+                    logger.warning(f"Specified driver path does not exist: {driver_path}. Falling back to default logic.")
+                    driver_path = None
+                if not os.access(driver_path, os.X_OK):
+                    logger.warning(f"Specified driver path is not executable: {driver_path}. Falling back to default logic.")
+                    driver_path = None
             if driver_path and os.path.exists(driver_path) and os.access(driver_path, os.X_OK):
                 # Detect driver type
                 res = subprocess.run([driver_path, '--help'], capture_output=True, text=True)
                 if 'msedge' in res.stdout:
                     from selenium.webdriver.edge.service import Service
-                    self.driver = webdriver.Edge(service=Service(driver_path))
+                    
+                    self.driver = webdriver.Edge(service=Service(driver_path), options=build_browser_options("Edge"))
                     logger.info("Using Edge WebDriver from specified path.")
                     return
                 elif 'Firefox' in res.stdout:
                     from selenium.webdriver.firefox.service import Service
-                    self.driver = webdriver.Firefox(service=Service(driver_path))
+                    self.driver = webdriver.Firefox(service=Service(driver_path), options=build_browser_options("Firefox"))
                     logger.info("Using Firefox WebDriver from specified path.")
                     return
                 elif 'chrome' in res.stdout:
                     from selenium.webdriver.chrome.service import Service
-                    self.driver = webdriver.Chrome(service=Service(driver_path))
+                    self.driver = webdriver.Chrome(service=Service(driver_path), options=build_browser_options("Chrome"))
                     logger.info("Using Chrome WebDriver from specified path.")
                     return
                 else:
@@ -253,24 +324,24 @@ class TDCCAutomation:
                     driver_path = None
             # no valid driver from path, try based on browser type
             if browser_type=="Edge":
-                self.driver = webdriver.Edge()
+                self.driver = webdriver.Edge(options=build_browser_options("Edge"))
                 logger.info("Using Edge WebDriver.")
                 return
             elif browser_type=="Firefox":
-                self.driver = webdriver.Firefox()
+                self.driver = webdriver.Firefox(options=build_browser_options("Firefox"))
                 logger.info("Using Firefox WebDriver.")
                 return
             elif browser_type=="Chrome":
-                self.driver = webdriver.Chrome()
+                self.driver = webdriver.Chrome(options=build_browser_options("Chrome"))
                 logger.info("Using Chrome WebDriver.")
                 return
             raise Exception("Failed to initialize specified browser. Falling back to default logic.")
         # Default logic
         except Exception as e:
             logger.warning(f"Failed to open specific browser: {e}. Trying fallbacks...")
-            for fallback in [webdriver.Edge, webdriver.Firefox, webdriver.Chrome]:
+            for fallback_name, fallback in [("Edge", webdriver.Edge), ("Firefox", webdriver.Firefox), ("Chrome", webdriver.Chrome)]:
                 try:
-                    self.driver = fallback()
+                    self.driver = fallback(options=build_browser_options(fallback_name))
                     logger.info(f"Using {fallback.__name__} WebDriver as fallback.")
                     break
                 except: 
@@ -279,13 +350,53 @@ class TDCCAutomation:
         
         if not self.driver:
             logger.critical("Failed to initialize any WebDriver.")
-            input("Press Enter to Exit...")
-            os.remove("running.lock")
-            sys.exit(1)
+            self.exit(1)
         
         logger.info("WebDriver initialized successfully.")
         return
     
+    def cleanup(self):
+        if self.driver:
+            self.logout()
+            self.driver.quit()
+            self.driver = None
+            logger.info("WebDriver closed.")
+        # Clean up temp download files
+        try:
+            for f in os.listdir(self.tmp_download_path):
+                logger.info(f"Removing temporary file: {f}")
+                os.remove(os.path.join(self.tmp_download_path, f))
+            try:
+                os.rmdir(self.tmp_download_path)
+            #not exist
+            except FileNotFoundError: pass
+            except OSError as e:
+                logger.error(f"Error removing temporary directory: {e}")
+            logger.info("Cleaned up temporary download files.")
+            try:
+                os.remove("./statement.html")
+            except FileNotFoundError: pass
+        except Exception as e:
+            logger.error(f"Error during cleanup: {e}")
+    
+    def exit(self, code=0):
+        self.cleanup()
+        if self.args.yes:
+            logger.info("Auto-exit enabled, exiting immediately.")
+            sys.exit(code)
+        input("Press Enter to Exit...")
+        assert os.path.exists("running.lock"), "running.lock not found during exit. This may indicate an unexpected state."
+        os.remove("running.lock")
+        logger.info("Exiting program.")
+        if code != 0:
+            logger.error(f"Exiting with error code: {code}")
+            # log calling stack for debugging
+            import traceback
+            logger.error("Stack trace at exit:\n" + traceback.format_exc())
+        else:
+            logger.info("Exiting successfully.")
+        sys.exit(0)
+
     # not code review yet
     def show_msg(self, txt1, timeout_sec, txt2):
         """In-browser message display using JS."""
@@ -316,18 +427,16 @@ class TDCCAutomation:
 
     def login(self, user_id):
         logger.info(f"Attempting login for {user_id}")
-        # get current document content(F12-->elements-->html)
-        self.driver.get("https://stockservices.tdcc.com.tw/evote/login/shareholder.html?language=TW")
-        time.sleep(5)
-        if str(user_id) in self.driver.page_source:
+
+        if self.check_login_as(user_id):
             logger.info(f"Already logged in as {user_id}.")
             self.current_user = user_id
             self.change_state(State.LOGIN)
             return True
         
         # Reset session
-        self.driver.get("https://stockservices.tdcc.com.tw/evote/logout.html")
-        self.current_user = None
+        if self.current_user is not None:
+            self.logout()
 
         time.sleep(2 * self.time_speed)
         self.driver.set_window_position(20, 20)
@@ -358,9 +467,7 @@ class TDCCAutomation:
             # Check for Maintenance
             if "系統維護中" in self.driver.page_source:
                 logger.error("System Maintenance detected.")
-                input("Press Enter to Exit...")
-                os.remove("running.lock")
-                sys.exit(1)
+                self.exit(1)
                 
             # Check for "Agree" button
             try:
@@ -371,9 +478,17 @@ class TDCCAutomation:
                     agree_btn.click()
                     logger.info("Clicked Agree button.")
             except: pass
+            
+            # 本次為重複登入或前次未能正常登出， 按下【確定】，將自動關閉前次連線， 並正常登入系統。
+            try:
+                self.driver.find_element(By.ID,"comfirmDialog_okBtn").click()
+                time.sleep(5*self.time_speed)
+            except:
+                pass
 
             # Check if logged in (redirected to main or list page)
-            if "tc_estock_welshas" in self.driver.current_url:
+            # if "tc_estock_welshas" in self.driver.current_url:
+            if self.check_login_as(user_id):
                 logger.info("Login successful.")
                 self.current_user = user_id
                 self.change_state(State.LOGIN)
@@ -382,8 +497,22 @@ class TDCCAutomation:
         logger.error("Login timeout.")
         return False
 
+    def logout(self):
+        try:
+            self.driver.get("https://stockservices.tdcc.com.tw/evote/logout.html")
+            logger.info("Logged out successfully.")
+            self.driver.delete_all_cookies()
+            self.change_state(State.LOGOUT)
+            self.current_user = None
+        except Exception as e:
+            logger.error(f"Error during logout: {e}")
+            assert self.check_login_as(self.current_user) == False, "Logout failed, still logged in as current user."
+
     def auto_vote_process(self):
         self.change_state(State.VOTING)
+        assert self.current_user is not None, "Current user is not set for voting process."
+        assert self.check_login_as(self.current_user), "Not logged in as the expected user for voting process."
+        
         logger.info(f"Starting auto-vote for {self.current_user}")
         self.driver.get("https://stockservices.tdcc.com.tw/evote/shareholder/000/tc_estock_welshas.html")
         
@@ -423,15 +552,11 @@ class TDCCAutomation:
                 
                 if "系統維護中" in self.driver.page_source:
                     logger.error("System Maintenance detected during voting.")
-                    input("Press Enter to Exit...")
-                    os.remove("running.lock")
-                    sys.exit(1)
+                    self.exit(1)
                 
                 if "系統操作逾時" in self.driver.page_source:
                     logger.warning("Session timeout detected during voting. Please restart the program and try again.")
-                    input("Press Enter to Exit...")
-                    os.remove("running.lock")
-                    sys.exit(1)
+                    self.exit(1)
 
                 # Record in vote_info_list for screenshot later
                 if self.current_user not in self.vote_info_list:
@@ -445,6 +570,8 @@ class TDCCAutomation:
                 break
 
     def perform_vote_logic(self):
+        assert self.check_login_as(self.current_user), "Not logged in as the expected user for performing vote logic."
+        
         """Inner logic for clicking options within a stock's voting page."""
         while True:
             if "投票已完成" in self.driver.page_source:
@@ -462,16 +589,12 @@ class TDCCAutomation:
             
             if "系統操作逾時" in self.driver.page_source:
                 logger.warning("Session timeout detected. Please restart the program and try again.")
-                input("Press Enter to Exit...")
-                os.remove("running.lock")
-                sys.exit(1)
+                self.exit(1)
 
             if "系統維護中" in self.driver.page_source:
                 logger.error("System Maintenance detected during voting.")
-                input("Press Enter to Exit...")
-                os.remove("running.lock")
-                sys.exit(1)
-            
+                self.exit(1)
+
             try:
                 wait = WebDriverWait(self.driver, 10)
                 # Default options (Accept/Opposite/Abstain all)
@@ -514,7 +637,7 @@ class TDCCAutomation:
                         page_info = self.driver.find_element(By.CSS_SELECTOR, 'body > header > div > div.c-header_pageInfo').text
                         logger.warning(f"Unknown voting page type. Page info: {page_info}")
                     except: 
-                        logger.warning("Unknown voting page type.", __LINE__)
+                        logger.warning("Unknown voting page type.")
                         pass
                     
                 # Proceed steps
@@ -530,28 +653,84 @@ class TDCCAutomation:
     
             except Exception as e:
                 logger.error(f"Perform vote logic failed: {e}")
-    
-    def take_screenshots(self):
+    def get_all_screenshotable_stocks(self, user_id):
+        assert self.check_login_as(user_id), "Not logged in as the expected user for getting screenshotable stocks."
+        
         self.change_state(State.SCREENSHOT)
-        if self.current_user not in self.vote_info_list or not self.vote_info_list[self.current_user]:
+        self.driver.get("https://stockservices.tdcc.com.tw/evote/shareholder/000/tc_estock_welshas.html")
+        #wait for page load(html)
+        try:
+            WebDriverWait(self.driver, 20).until(EC.presence_of_element_located((By.TAG_NAME, 'html')))
+        except TimeoutException:
+            logger.error("Failed to load page for fetching screenshotable stocks.")
+            return self.get_all_screenshotable_stocks(user_id)  # Retry loading the page
+        
+        #get csv download link(//div[@id='downloadMeetingList']/a)
+        link = self.driver.find_element(By.XPATH, "//div[@id='downloadMeetingList']/a")
+        #download csv content(click the link and wait for download to complete)
+        link.click()
+        time.sleep(10)
+        #find the latest downloaded csv file in tmp_download_path and check created time to ensure it's the correct file
+        csv_file = None
+        dir_list = os.listdir(self.tmp_download_path)
+        # filter csv files and sort by created time
+        csv_files = [f for f in dir_list if f.endswith('.csv')]
+        if not csv_files:
+            logger.error("No CSV file found in download directory.")
+            # retry
+            return self.get_all_screenshotable_stocks(user_id)
+        csv_files.sort(key=lambda x: os.path.getctime(os.path.join(self.tmp_download_path, x)), reverse=True)
+        # check abs time in 5 minutes to ensure it's the correct file
+        latest_file = csv_files[0]
+        latest_file_path = os.path.join(self.tmp_download_path, latest_file)
+        if (datetime.datetime.now() - datetime.datetime.fromtimestamp(os.path.getctime(latest_file_path))).total_seconds() > 300:
+            logger.error("No recent CSV file found in download directory.")
+            # retry
+            return self.get_all_screenshotable_stocks(user_id)
+        csv_file = latest_file
+        logger.info(f"Found CSV file: {csv_file}")
+        # read and parse the csv file to get stock ids with columnG"已投票"
+        stocks = []
+        import csv
+        with open(os.path.join(self.tmp_download_path, csv_file), 'r', encoding='utf-8') as f:
+            reader = csv.reader(f)
+            for row in reader:
+                if row[6].strip() == "已投票":
+                    stocks.append(row[0].strip())
+        logger.info(f"Screenshotable stocks for {user_id}: {stocks}")
+        self.vote_info_list[user_id].extend(stocks)
+        self.write_vote_info_list()
+        return
+
+
+    def take_screenshots(self,user_id=None):
+        assert self.check_login_as(user_id), "Not logged in as the expected user for taking screenshots."
+        
+        self.change_state(State.SCREENSHOT)
+        if user_id not in self.vote_info_list or not self.vote_info_list[user_id]:
             return
 
-        logger.info(f"Taking screenshots for {self.current_user}")
-        stocks_to_capture = list(self.vote_info_list[self.current_user])
-        
+        logger.info(f"Taking screenshots for {user_id}")
+        stocks_to_capture = list(self.vote_info_list[user_id])
+        if not stocks_to_capture:
+            logger.info("No stocks to capture for screenshots.")
+            return
+
         for stock_id in stocks_to_capture:
             match(self.capture_stock_screenshot(stock_id)):
                 case 0: # success
-                    self.vote_info_list[self.current_user].remove(stock_id)
+                    self.vote_info_list[user_id].remove(stock_id)
                     self.write_vote_info_list()
                 case 1: # failure, move to the end of the list for retry later
-                    self.vote_info_list[self.current_user].remove(stock_id)
-                    self.vote_info_list[self.current_user].append(stock_id)
+                    self.vote_info_list[user_id].remove(stock_id)
+                    self.vote_info_list[user_id].append(stock_id)
                     self.write_vote_info_list()
                 # case 2: eGift detected, skip without retry
             time.sleep(1)
 
     def capture_stock_screenshot(self, stock_id):
+        assert self.check_login_as(self.current_user), "Not logged in as the expected user for capturing screenshots."
+        
         try:
             self.driver.get("https://stockservices.tdcc.com.tw/evote/shareholder/000/tc_estock_welshas.html")
             wait = WebDriverWait(self.driver, 10)
@@ -572,12 +751,16 @@ class TDCCAutomation:
 
             found = False
             stock_name = "unknown"
+            eGift = None
             for row in items:
                 if stock_id in row.text:
                     stock_name = row.text.split()[1].replace("*", "")
                     links = row.find_elements(By.TAG_NAME, 'a')
                     query_link = next((l for l in links if "查詢" in l.text), None)
                     if query_link:
+                        if "Y" in row.find_element(By.XPATH, './/td[4]').text:
+                            eGift = row.find_element(By.XPATH, './/td[4]').text.split("Y")[1].strip()
+                            logger.info(f"eGift electronic souvenir detected for stock {stock_id}. Will check inside before screenshot.")
                         query_link.click()
                         found = True
                         break
@@ -602,11 +785,13 @@ class TDCCAutomation:
             # Prepare filename based on mode
             account_id = "unknown"
             try:
-                table_text = self.driver.find_element(By.TAG_NAME, 'table').text
-                if "戶號" in table_text:
-                    ###  TODO
-                    # Very rough extraction, ideally use more specific selectors
-                    account_id = table_text.split("戶號")[-1].split()[0]
+                # wait for table to load
+                wait = WebDriverWait(self.driver, 10)
+                table = wait.until(EC.presence_of_element_located((By.XPATH, '//table[0]//tr')))
+                for row in table:
+                    if "戶號" in row.text:
+                        account_id = row.find_element(By.XPATH, '//td').text.strip()
+                        break
             except: pass
 
 
@@ -625,31 +810,43 @@ class TDCCAutomation:
                 filename = f"{stock_id}_{stock_name}_{id_part}_{timestamp}.png"
                 save_path = os.path.join(path, filename)
 
-            # check egift
-            while(True):
-                try:
-                    # found barcode
-                    self.driver.find_element(By.CSS_SELECTOR,'div[class="u-width--100 u-t_align--right"]')
-                    tmp_cnt=0
-                    break
-                except:
-                    try:
-                        if self.driver.find_element(By.CSS_SELECTOR,'li.c-hint:nth-child(1)').get_property("innerText").find("eGift電子紀念品") != -1:
-                            logger.info("eGift electronic souvenir detected, skipping screenshot.")
-                            with open(os.path.join(path, "eGift_skipped.txt"), 'a', encoding='utf-8') as f:
-                                if self.screenshot_mode == 1:
-                                    f.write(f"{stock_id}\n")
-                                else:
-                                    f.write(f"{stock_id}_{account_id}_{self.current_user}\n")
-                            # return 2
-                            break
-                    except:
-                        tmp_cnt+=1
-                        time.sleep(1)
-                        if tmp_cnt%8==0:
-                            logger.warning("Unhandled page layout, screenshot may be incorrect")
-                            return 1
-                        continue
+            #eGift
+            if eGift!= None:
+                #change screenshot filename
+                filename = f"eGift_{filename}"
+                save_path = os.path.join(path, filename)
+                
+                # add eGift info to filename and save to eGift list
+                with open(os.path.join(path, f"eGifts_{datetime.datetime.now().strftime('%Y')}.txt"), 'a', encoding='utf-8') as f:
+                    if self.screenshot_mode == 1:
+                        f.write(f"{stock_id}_{eGift}\n")
+                    else:
+                        f.write(f"{stock_id}_{account_id}_{self.current_user}_{eGift}\n")
+            # # check egift
+            # while(True):
+            #     try:
+            #         # found barcode
+            #         self.driver.find_element(By.CSS_SELECTOR,'div[class="u-width--100 u-t_align--right"]')
+            #         tmp_cnt=0
+            #         break
+            #     except:
+            #         try:
+            #             if self.driver.find_element(By.CSS_SELECTOR,'li.c-hint:nth-child(1)').get_property("innerText").find("eGift電子紀念品") != -1:
+            #                 logger.info("eGift electronic souvenir detected, skipping screenshot.")
+            #                 with open(os.path.join(path, "eGift_skipped.txt"), 'a', encoding='utf-8') as f:
+            #                     if self.screenshot_mode == 1:
+            #                         f.write(f"{stock_id}\n")
+            #                     else:
+            #                         f.write(f"{stock_id}_{account_id}_{self.current_user}\n")
+            #                 # return 2
+            #                 break
+            #         except:
+            #             tmp_cnt+=1
+            #             time.sleep(1)
+            #             if tmp_cnt%8==0:
+            #                 logger.warning("Unhandled page layout, screenshot may be incorrect")
+            #                 return 1
+            #             continue
 
             self.driver.save_screenshot(save_path)
             logger.info(f"Screenshot saved: {save_path}")
@@ -666,7 +863,8 @@ class TDCCAutomation:
     def write_program_setting(self):
         config_path = './program_setting.conf'
         try:
-            content = f"{self.screenshot_mode}|/|{int(self.time_speed*2)}|/|{'@'.join(self.shareholder_ids)}"
+            content = f"{self.screenshot_mode}|/|{float(self.time_speed*2)}|/|{'@'.join(self.shareholder_ids)}"
+            logger.info(f"Writing program settings with content: {content}")
             h = hashlib.sha256(content.encode()).hexdigest()
             with open(config_path, 'w', encoding='utf-8') as f:
                 f.write(f"screenshot_mode:::{self.screenshot_mode}\n")
@@ -678,10 +876,21 @@ class TDCCAutomation:
             logger.error(f"Failed to save program settings: {e}")
 
     def vi_program_setting(self):
-        print("\n--- Program Setting Configuration ---")
-        
+        if self.args.yes:
+            logger.info("Auto-confirm mode is enabled. Shouldn't be configuring program settings interactively. Exiting.")
+            self.exit(1)
+        print("\n--- Program Setting Configuration(User Settings) ---")
+        if os.path.exists('./program_setting.conf'):
+            print("Existing program settings found. Do you want to reconfigure? (y/n) [n]: ")
+            while True:
+                m = input().lower()
+                if m in ['y', 'n', '']:
+                    break
+            if m == 'n' or m == '':
+                logger.info("Keeping existing program settings.")
+                return
         # Screenshot file structure
-        print("Screenshot file structure:")
+        print("--------------------- Screenshot file structure:  ------------------------------")
         print("1. Current structure (per user folder)")
         print("2. All in one, {stock_id}_{stock_name}_{account_id}.png")
         print("3. All in one, {stock_id}_{stock_name}_{user_id}.png")
@@ -692,6 +901,7 @@ class TDCCAutomation:
         self.screenshot_mode = int(m)
 
         # set time speed
+        print("--------------------- Run Speed Configuration:  ------------------------------")
         print("Run speed: (default 2, smaller is faster)")
         print("set it larger if:")
         print("    - your computer is slow")
@@ -705,12 +915,18 @@ class TDCCAutomation:
         self.time_speed = (int(s)) / 2
 
         # Set shareholder IDs
+        print("--------------------- Shareholder IDs Configuration:  ------------------------------")
         print("Enter shareholder IDs (Taiwan citizen ID), one per line, 'end' to finish:")
         print("Example: A123456789")
         self.shareholder_ids = []
         while True:
             uid = input("> ").strip().upper()
-            if uid == 'END': break
+            if uid == 'END': 
+                if not self.shareholder_ids:
+                    print("At least one shareholder ID is required.")
+                    continue
+                else: 
+                    break
             if not uid: continue
             res = self.id_check(uid)
             if res == 0: self.shareholder_ids.append(uid)
@@ -737,6 +953,7 @@ class TDCCAutomation:
         try:
             content = f"{self.vote_settings['default']}|/|{'#'.join(self.vote_settings['accept'])}|/|{'$'.join(self.vote_settings['opposite'])}|/|{'%'.join(self.vote_settings['abstain'])}|/|{self.vote_settings['manual_vote']}"
             h = hashlib.sha256(content.encode()).hexdigest()
+            # logger.info(content)
             with open(config_path, 'w', encoding='utf-8') as f:
                 f.write(f"default:::{self.vote_settings['default']}\n")
                 f.write(f"accept:::{'|/|'.join(self.vote_settings['accept'])}\n")
@@ -749,11 +966,26 @@ class TDCCAutomation:
             logger.error(f"Failed to save vote settings: {e}")
 
     def vi_vote_setting(self):
-        print("\n--- Vote Setting Configuration ---")
+        if self.args.yes:
+            logger.info("Auto-confirm mode is enabled. Shouldn't be configuring vote settings interactively. Exiting.")
+            self.exit(1)
+        
+        if os.path.exists('./vote_setting.conf'):
+            print("Existing vote settings found. Do you want to reconfigure? (y/n) [n]: ")
+            while True:
+                m = input().lower()
+                if m in ['y', 'n', '']:
+                    break
+            if m == 'n' or m == '':
+                logger.info("Keeping existing vote settings.")
+                return
+    
+        print("\n--------------------- Vote Setting Configuration:  ------------------------------")
         d = input("Default vote option (accept/opposite/abstain) [abstain]: ").lower()
         self.vote_settings['default'] = d if d in ['accept', 'opposite', 'abstain'] else 'abstain'
 
         for action in ['accept', 'opposite', 'abstain']:
+            print(f"\n--------------------- Manual vote keywords for '{action}' option:  ------------------------------")
             print(f"Keywords to {action} (one per line, 'end' to finish):")
             self.vote_settings[action] = []
             while True:
@@ -796,7 +1028,6 @@ class TDCCAutomation:
             print("="*30)
             print("(1) All accounts: Vote + Screenshot")
             print("(2) Specific stocks: Take screenshots")
-            ###  TODO
             print("(3) ALL stocks: Take screenshots")
             print("(4) Configure settings")
             print("(5) Exit")
@@ -813,7 +1044,7 @@ class TDCCAutomation:
 
             if choice == "1":
                 if not self.shareholder_ids:
-                    print("No shareholder IDs configured. Please configure first.")
+                    logger.error("No shareholder IDs configured. Please configure first.")
                     self.vi_program_setting()
                     self.load_configs()
                     continue
@@ -821,39 +1052,49 @@ class TDCCAutomation:
                 for uid in self.shareholder_ids:
                     if self.login(uid):
                         self.auto_vote_process()
-                        self.take_screenshots()
+                        self.take_screenshots(uid)
                         self.logout()
-                if self.driver: 
-                    self.driver.quit()
-                if self.args.yes: 
-                    break
+                self.exit(0)
+
             elif choice == "2":
-                while True:
-                    uid = input("Enter User ID: ").strip().upper()
-                    if self.id_check(uid) == 0:
+                while True: # for different users
+                    while True:
+                        uid = input("Enter User ID one per time(End to exit): ").strip().upper()
+                        if uid.upper() == "END":
+                            return
+                        if self.id_check(uid) != 0:
+                            print("Invalid ID format. Please try again.")
+                            continue
                         break
-                    print("Invalid ID format. Please try again.")
-                self.open_browser()
-                if self.login(uid):
-                    stocks = input("Enter stock IDs (comma separated): eg:2330,2634").split(",")
-                    self.vote_info_list[uid] = [s.strip() for s in stocks if s.strip()]
-                    self.take_screenshots()
-                    self.logout()
-                if self.driver:
-                    self.driver.quit()
+                    self.open_browser()
+                    if self.current_user!=None and self.current_user!=uid:
+                        self.logout()
+                    if self.login(uid):
+                        stocks = input("Enter stock IDs (comma separated): eg:2330,2634").split(",")
+                        self.vote_info_list[uid] = [s.strip() for s in stocks if s.strip()]
+                        self.take_screenshots(uid)
             elif choice == "3":
-                raise NotImplementedError("Option 3 (ALL stocks screenshot) is not implemented yet.")
+                while True: # for different users
+                    while True:
+                        uid = input("Enter User ID one per time(End to exit): ").strip().upper()
+                        if uid.upper() == "END":
+                            return
+                        if self.id_check(uid) != 0:
+                            print("Invalid ID format. Please try again.")
+                            continue
+                        break
+                    self.open_browser()
+                    if self.current_user!=None and self.current_user!=uid:
+                        self.logout()
+                    if self.login(uid):
+                        self.get_all_screenshotable_stocks(uid)
+                        self.take_screenshots(uid)
             elif choice == "4":
                 self.vi_program_setting()
                 self.vi_vote_setting()
             elif choice == "5":
                 print("Exiting...")
-                if self.driver: 
-                    self.driver.quit()
-                input("Press Enter to Exit...")
-                os.remove("running.lock")
-                sys.exit(0)
-                break
+                self.exit(0)
             else:
                 print("Invalid choice.")
 
@@ -912,14 +1153,17 @@ class TDCCAutomation:
             if self.args.yes or choice == 'y':
                 self.open_browser()
                 for uid in list(self.vote_info_list.keys()):
+                    if not self.vote_info_list[uid]:  # only attempt if there are pending stocks
+                        continue
                     if self.login(uid):
-                        self.take_screenshots()
+                        self.take_screenshots(uid)
                         self.logout()
-                if self.driver: self.driver.quit()
 
         self.main_menu()
+        self.cleanup()
         self.change_state(State.FINISH)
         logger.info("Automation session ended.")
+        self.exit(0)
 
 def parse_args():
     parser = argparse.ArgumentParser(description="TDCC evote and screenshot automation tool")
@@ -929,32 +1173,45 @@ def parse_args():
     return parser.parse_args()
 
 if __name__ == "__main__":
+    args = parse_args()
     if os.path.exists("running.lock"):
-        print("Another instance is already running. Please close it before starting a new one.")
-        input("Press Enter to Exit...")
-        sys.exit(1)
+        #if the previous process is terminated but the lock file still exists, check if the process is still running by checking the pid in the lock file
+        with open("running.lock", "r") as f:
+            pid = int(f.read())
+        # get process name by pid
+        import psutil
+        try:
+            process = psutil.Process(pid)
+            if process.is_running() and any(keyword in process.name() for keyword in ["python", "python3","TDCC"]):
+                logger.warning(f"Another instance (PID: {pid}) is still running.")
+                if args.yes:
+                    sys.exit(1)
+                input("Press Enter to Exit...")
+                sys.exit(1)
+            else:
+                logger.warning(f"Stale lock file detected. Previous process (PID: {pid}) is not running. Removing lock file.")
+                if process.is_running():
+                    # log it's name for debugging
+                    logger.warning(f"Process with PID {pid} is running but does not seem to be a TDCC automation process. Process name: {process.name()}. Removing lock file.")
+                os.remove("running.lock")
+        except psutil.NoSuchProcess:
+            logger.warning(f"Stale lock file detected. Previous process (PID: {pid}) is not running. Removing lock file.")
+            os.remove("running.lock")
 
     with open("running.lock", "w") as f:
         f.write(str(os.getpid()))
     
-    args = parse_args()
     bot = TDCCAutomation(args)
     try:
         bot.run()
     except KeyboardInterrupt:
         logger.info("Process interrupted by user.")
-        if bot.driver: 
-            bot.driver.quit()
-            input("Press Enter to Exit...")
-            os.remove("running.lock")
-            sys.exit(1)
+        bot.exit(1)
     except Exception as e:
         logger.critical(f"Unhandled exception: {e}", exc_info=True)
-        if bot.driver: 
-            bot.driver.quit()
-        input("Press Enter to Exit...")
-        os.remove("running.lock")
-        sys.exit(1)
+        bot.exit(1)
+
     finally:
-        os.remove("running.lock")
+        if os.path.exists("running.lock"):
+            os.remove("running.lock")
 
