@@ -844,21 +844,34 @@ class TDCCAutomation:
             return
 
         for stock_id in stocks_to_capture:
-            match(self.capture_stock_screenshot(stock_id)):
-                case 0: # success
+            attempt = 0
+            while(attempt < 3):  # Retry up to 3 times
+                attempt += 1
+                if(self.capture_stock_screenshot(stock_id)==0): # success
                     self.vote_info_list[user_id].remove(stock_id)
                     self.write_vote_info_list()
-                case 1: # failure, move to the end of the list for retry later
-                    self.vote_info_list[user_id].remove(stock_id)
-                    self.vote_info_list[user_id].append(stock_id)
-                    self.write_vote_info_list()
-                # case 2: eGift detected, skip without retry
+                    break
+                else:# failure, retry at most 3 times, if still fail, skip and log
+                    logger.warning(f"Failed to capture screenshot for stock {stock_id} on attempt {attempt}. Retrying...")
+                    if attempt == 3:
+                        logger.error(f"Failed to capture screenshot for stock {stock_id} after 3 attempts. Skipping.")
+                        self.vote_info_list[user_id].remove(stock_id)
+                        self.write_vote_info_list()
+                        break
+                    # case 2: eGift detected, skip without retry
             time.sleep(1)
+            
+            #clear search box for next stock
+            wait = WebDriverWait(self.driver, 10)
+            search_box = wait.until(EC.presence_of_element_located((By.NAME, 'qryStockId')))
+            search_box.clear()
+            self.driver.find_element(By.CSS_SELECTOR, 'a[onclick="qryByStockId();"]').click()
 
     def capture_stock_screenshot(self, stock_id):
         assert self.check_login_as(self.current_user), "Not logged in as the expected user for capturing screenshots."
         
         try:
+            # query
             self.driver.get("https://stockservices.tdcc.com.tw/evote/shareholder/000/tc_estock_welshas.html")
             wait = WebDriverWait(self.driver, 10)
             search_box = wait.until(EC.presence_of_element_located((By.NAME, 'qryStockId')))
@@ -879,6 +892,7 @@ class TDCCAutomation:
             found = False
             stock_name = "unknown"
             eGift = None
+            # sort(for newest date) and click to barcode page
             for row in items:
                 if stock_id in row.text:
                     stock_name = row.text.split()[1].replace("*", "")
@@ -894,11 +908,11 @@ class TDCCAutomation:
                     else:
                         logger.warning(f"Query link not found for stock {stock_id}.")
                         logger.debug(f"Row content: {row.text}")
-                        return False
+                        return 1
             
             if not found:
                 logger.warning(f"Stock {stock_id} not found for screenshot.")
-                return False
+                return 1
 
             # what is it?
             time.sleep(2)
@@ -997,7 +1011,7 @@ class TDCCAutomation:
         except Exception as e:
             logger.error(f"Screenshot failed for {stock_id}: {e}")
             return 1
-
+        
     def write_program_setting(self):
         config_path = './program_setting.conf'
         try:
