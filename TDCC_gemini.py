@@ -713,6 +713,7 @@ class TDCCAutomation:
                         vote_rows = self.driver.find_elements(By.XPATH, '//td/input[@type="radio"]/../..')
                         for row in vote_rows:
                             text = row.text
+                            logger.info(text)
                             value = None
                             if any(k in text for k in self.vote_settings['accept']): value = "A"
                             elif any(k in text for k in self.vote_settings['opposite']): value = "O"
@@ -1376,7 +1377,8 @@ if __name__ == "__main__":
 
     with open("running.lock", "w") as f:
         f.write(str(os.getpid()))
-    
+        
+    logger.info(f"================================    Process started with PID: {os.getpid()}    ================================")
     bot = TDCCAutomation(args)
     try:
         bot.run()
