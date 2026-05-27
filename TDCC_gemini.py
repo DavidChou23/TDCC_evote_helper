@@ -1325,7 +1325,7 @@ class TDCCAutomation:
                         continue
                     if self.login(uid):
                         self.take_screenshots(uid)
-                        self.logout()
+                        # self.logout()
 
         self.main_menu()
         self.cleanup()
