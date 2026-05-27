@@ -1186,8 +1186,13 @@ class TDCCAutomation:
                     if self.current_user!=None and self.current_user!=uid:
                         self.logout()
                     if self.login(uid):
-                        stocks = input("Enter stock IDs (comma separated): eg:2330,2634").split(",")
-                        self.vote_info_list[uid] = [s.strip() for s in stocks if s.strip()]
+                        # split with "," and "."(if user input with ".") and remove extra spaces, then filter out empty ones
+                        stocks = input("Enter stock IDs (comma separated eg:2330,2634): ").split(",")
+                        stocks = [s.strip() for s in stocks if s.strip()]
+                        stocks = ".".join(stocks).split(".")
+                        stocks = [s.strip() for s in stocks if s.strip()]
+                        self.vote_info_list[uid] = stocks
+                        self.write_vote_info_list()
                         self.take_screenshots(uid)
             elif choice == "3":
                 while True: # for different users
