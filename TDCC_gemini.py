@@ -176,8 +176,7 @@ class TDCCAutomation:
         # self.driver.close()
         # self.driver.switch_to.window(self.driver.window_handles[0])
         return False
-        
-        
+
     def load_configs(self):
         self.read_program_setting()
         self.read_vote_setting()
@@ -263,6 +262,7 @@ class TDCCAutomation:
             logger.info("Loaded vote settings.")
         except Exception as e:
             logger.error(f"Error reading vote settings: {e}")
+
     def read_voteinfolist_old(self, file_full_path):
         # for compatibility with old version, used to change file structure from txt to json
         file_full_path = file_full_path.replace("\\\\","\\").replace("\\","/")  # windows path compatibility
@@ -312,6 +312,173 @@ class TDCCAutomation:
                 logger.info(f"Converted old format and removed: {txt_file}")
             except Exception as e:
                 logger.error(f"Error converting old format for {txt_file}: {e}")
+
+    def write_program_setting(self):
+        config_path = './program_setting.conf'
+        try:
+            content = f"{self.screenshot_mode}|/|{float(self.time_speed*2)}|/|{'@'.join(self.shareholder_ids)}"
+            logger.info(f"Writing program settings with content: {content}")
+            h = hashlib.sha256(content.encode()).hexdigest()
+            with open(config_path, 'w', encoding='utf-8') as f:
+                f.write(f"screenshot_mode:::{self.screenshot_mode}\n")
+                f.write(f"time_speed:::{int(self.time_speed*2)}\n")
+                f.write(f"shareholderIDs:::{'|/|'.join(self.shareholder_ids)}\n")
+                f.write(f"hash:::{h}\n")
+            logger.info("Program settings saved.")
+        except Exception as e:
+            logger.error(f"Failed to save program settings: {e}")
+
+    def write_vote_setting(self):
+        config_path = './vote_setting.conf'
+        self.vote_settings['manual_vote'] = any(self.vote_settings[a] for a in ['accept', 'opposite', 'abstain'])
+        try:
+            content = f"{self.vote_settings['default']}|/|{'#'.join(self.vote_settings['accept'])}|/|{'$'.join(self.vote_settings['opposite'])}|/|{'%'.join(self.vote_settings['abstain'])}|/|{self.vote_settings['manual_vote']}"
+            h = hashlib.sha256(content.encode()).hexdigest()
+            # logger.info(content)
+            with open(config_path, 'w', encoding='utf-8') as f:
+                f.write(f"default:::{self.vote_settings['default']}\n")
+                f.write(f"accept:::{'|/|'.join(self.vote_settings['accept'])}\n")
+                f.write(f"opposite:::{'|/|'.join(self.vote_settings['opposite'])}\n")
+                f.write(f"abstain:::{'|/|'.join(self.vote_settings['abstain'])}\n")
+                f.write(f"manual_vote:::{self.vote_settings['manual_vote']}\n")
+                f.write(f"hash:::{h}\n")
+            logger.info("Vote settings saved.")
+        except Exception as e:
+            logger.error(f"Failed to save vote settings: {e}")
+
+    def write_vote_info_list(self):
+        path = f"{self.base_path}/incomplete_screenshot_list.json"
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(self.vote_info_list, f)
+        # logger.info(f"Write unfinished tasks: {self.vote_info_list}")
+
+    def vi_program_setting(self):
+        if self.args.yes:
+            logger.info("Auto-confirm mode is enabled. Shouldn't be configuring program settings interactively. Exiting.")
+            self.exit(1)
+        print("\n--- Program Setting Configuration(User Settings) ---")
+        if os.path.exists('./program_setting.conf'):
+            print("Existing program settings found. Do you want to reconfigure? (y/n) [n]: ")
+            while True:
+                m = input().lower()
+                if m in ['y', 'n', '']:
+                    break
+            if m == 'n' or m == '':
+                logger.info("Keeping existing program settings.")
+                return
+        # Screenshot file structure
+        print("--------------------- Screenshot file structure:  ------------------------------")
+        print("1. Current structure (per user folder)")
+        print("2. All in one, {stock_id}_{stock_name}_{account_id}.png")
+        print("3. All in one, {stock_id}_{stock_name}_{user_id}.png")
+        while True:
+            m = input("Select screenshot file structure (1-3) [1]: ")
+            if m in ['1', '2', '3']:
+                break
+        self.screenshot_mode = int(m)
+
+        # set time speed
+        print("--------------------- Run Speed Configuration:  ------------------------------")
+        print("Run speed: (default 2, smaller is faster)")
+        print("set it larger if:")
+        print("    - your computer is slow")
+        print("    - your network is slow")
+        print("    - the TDCC server thinks you are a robot")
+        while True:
+            s = input("Enter run speed (1-30, smaller is faster) [2]: ")
+            if s.isdigit() and 1 <= int(s) <= 30:
+                break
+            if s == "": s = "2"
+        self.time_speed = (int(s)) / 2
+
+        # Set shareholder IDs
+        print("--------------------- Shareholder IDs Configuration:  ------------------------------")
+        print("Enter shareholder IDs (Taiwan citizen ID), one per line, 'end' to finish:")
+        print("Example: A123456789")
+        self.shareholder_ids = []
+        while True:
+            uid = input("> ").strip().upper()
+            if uid == 'END': 
+                if not self.shareholder_ids:
+                    print("At least one shareholder ID is required.")
+                    continue
+                else: 
+                    break
+            if not uid: continue
+            res = self.id_check(uid)
+            if res == 0: self.shareholder_ids.append(uid)
+            else: print(f"Invalid ID: {uid} (Error reason: { 'Format error' if res == 1 else 'Check digit error' if res == 2 else 'Unknown error' })")
+        
+        # print for confirmation
+        print("\nCurrent Settings:")
+        print(f"Screenshot Mode: {self.screenshot_mode}: {'Per user folders' if self.screenshot_mode == 1 else 'All in one with account ID' if self.screenshot_mode == 2 else 'All in one with user ID'}")
+        print(f"Time Speed: {self.time_speed*2}")
+        print(f"Shareholder IDs: {', '.join(self.shareholder_ids)}")
+        while True:
+            confirm = input("Is this correct? (y/n): ").lower()
+            if confirm in ['y', 'n']:
+                break
+        if confirm == 'y':
+            self.write_program_setting()
+        else:
+            print("Settings not saved. Please reconfigure.")
+            return self.vi_program_setting()
+
+    def vi_vote_setting(self):
+        if self.args.yes:
+            logger.info("Auto-confirm mode is enabled. Shouldn't be configuring vote settings interactively. Exiting.")
+            self.exit(1)
+        
+        if os.path.exists('./vote_setting.conf'):
+            print("Existing vote settings found. Do you want to reconfigure? (y/n) [n]: ")
+            while True:
+                m = input().lower()
+                if m in ['y', 'n', '']:
+                    break
+            if m == 'n' or m == '':
+                logger.info("Keeping existing vote settings.")
+                return
+    
+        print("\n--------------------- Vote Setting Configuration:  ------------------------------")
+        d = input("Default vote option (accept/opposite/abstain) [abstain]: ").lower()
+        self.vote_settings['default'] = d if d in ['accept', 'opposite', 'abstain'] else 'abstain'
+
+        for action in ['accept', 'opposite', 'abstain']:
+            print(f"\n--------------------- Manual vote keywords for '{action}' option:  ------------------------------")
+            print(f"Keywords to {action} (one per line, 'end' to finish):")
+            self.vote_settings[action] = []
+            while True:
+                kw = input("> ").strip()
+                if kw.lower() == 'end': break
+                if kw: self.vote_settings[action].append(kw)
+        
+        self.vote_settings['manual_vote'] = any(self.vote_settings[a] for a in ['accept', 'opposite', 'abstain'])
+        
+        # check keywords do not overlap
+        all_keywords = self.vote_settings['accept'] + self.vote_settings['opposite'] + self.vote_settings['abstain']
+        if len(all_keywords) != len(set(all_keywords)):
+            print("Error: Keywords cannot overlap between categories.")
+            return self.vi_vote_setting()
+        
+        # default vote option cannot have keywords
+        if self.vote_settings[self.vote_settings['default']]:
+            self.vote_settings[self.vote_settings['default']] = []
+            
+        # print for confirmation
+        print("\nCurrent Vote Settings:")
+        print(f"Default Vote: {self.vote_settings['default']}")
+        print(f"Accept Keywords: {', '.join(self.vote_settings['accept'])}")
+        print(f"Opposite Keywords: {', '.join(self.vote_settings['opposite'])}")
+        print(f"Abstain Keywords: {', '.join(self.vote_settings['abstain'])}")
+        while True:
+            confirm = input("Is this correct? (y/n): ").lower()
+            if confirm in ['y', 'n']:
+                break
+        if confirm == 'y':
+            self.write_vote_setting()
+        else:
+            print("Settings not saved. Please reconfigure.")
+            return self.vi_vote_setting()
 
     # not code review yet
     def show_msg(self, txt1, timeout_sec, txt2):
@@ -436,76 +603,6 @@ class TDCCAutomation:
         
         logger.info("WebDriver initialized successfully.")
         return
-    
-    def cleanup(self):
-        if self.driver:
-            self.logout()
-            self.driver.quit()
-            self.driver = None
-            logger.info("WebDriver closed.")
-        # Clean up temp download files
-        try:
-            for f in os.listdir(self.tmp_download_path):
-                logger.info(f"Removing temporary file: {f}")
-                os.remove(os.path.join(self.tmp_download_path, f))
-            try:
-                os.rmdir(self.tmp_download_path)
-            #not exist
-            except FileNotFoundError: pass
-            except OSError as e:
-                logger.error(f"Error removing temporary directory: {e}")
-            logger.info("Cleaned up temporary download files.")
-            try:
-                os.remove("./statement.html")
-            except FileNotFoundError: pass
-        except Exception as e:
-            logger.error(f"Error during cleanup: {e}")
-    
-    def exit(self, code=0):
-        self.cleanup()
-        if self.args.yes:
-            logger.info("Auto-exit enabled, exiting immediately.")
-            sys.exit(code)
-        input("Press Enter to Exit...")
-        assert os.path.exists("running.lock"), "running.lock not found during exit. This may indicate an unexpected state."
-        os.remove("running.lock")
-        logger.info("Exiting program.")
-        if code != 0:
-            logger.error(f"Exiting with error code: {code}")
-            # log calling stack for debugging
-            import traceback
-            logger.error("Stack trace at exit:\n" + traceback.format_exc())
-        else:
-            logger.info("Exiting successfully.")
-        sys.exit(0)
-
-    # not code review yet
-    def show_msg(self, txt1, timeout_sec, txt2):
-        """In-browser message display using JS."""
-        def run_msg():
-            try:
-                self.driver.execute_script("""
-                    if (!document.getElementById('gemini-msg')) {
-                        var div = document.createElement('div');
-                        div.id = 'gemini-msg';
-                        div.style.position = 'fixed'; div.style.top = '15px'; div.style.left = '10px';
-                        div.style.padding = '10px'; div.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
-                        div.style.color = '#00ff00'; div.style.fontSize = '16px'; div.style.zIndex = '9999';
-                        document.body.appendChild(div);
-                    }
-                """)
-                if timeout_sec > 0:
-                    for i in range(timeout_sec, 0, -1):
-                        self.driver.execute_script(f"document.getElementById('gemini-msg').innerText = '{txt1} ({i}s)';")
-                        time.sleep(1)
-                else:
-                    self.driver.execute_script(f"document.getElementById('gemini-msg').innerText = '{txt1}';")
-                    time.sleep(2)
-                self.driver.execute_script(f"document.getElementById('gemini-msg').innerText = '{txt2}';")
-                time.sleep(1)
-                self.driver.execute_script("document.getElementById('gemini-msg').remove();")
-            except: pass
-        threading.Thread(target=run_msg, daemon=True).start()
 
     def login(self, user_id):
         logger.info(f"Attempting login for {user_id}")
@@ -589,6 +686,48 @@ class TDCCAutomation:
         except Exception as e:
             logger.error(f"Error during logout: {e}")
             assert self.check_login_as(self.current_user) == False, "Logout failed, still logged in as current user."
+
+    def cleanup(self):
+        if self.driver:
+            self.logout()
+            self.driver.quit()
+            self.driver = None
+            logger.info("WebDriver closed.")
+        # Clean up temp download files
+        try:
+            for f in os.listdir(self.tmp_download_path):
+                logger.info(f"Removing temporary file: {f}")
+                os.remove(os.path.join(self.tmp_download_path, f))
+            try:
+                os.rmdir(self.tmp_download_path)
+            #not exist
+            except FileNotFoundError: pass
+            except OSError as e:
+                logger.error(f"Error removing temporary directory: {e}")
+            logger.info("Cleaned up temporary download files.")
+            try:
+                os.remove("./statement.html")
+            except FileNotFoundError: pass
+        except Exception as e:
+            logger.error(f"Error during cleanup: {e}")
+    
+    def exit(self, code=0):
+        self.cleanup()
+        if self.args.yes:
+            logger.info("Auto-exit enabled, exiting immediately.")
+            sys.exit(code)
+        input("Press Enter to Exit...")
+        assert os.path.exists("running.lock"), "running.lock not found during exit. This may indicate an unexpected state."
+        os.remove("running.lock")
+        logger.info("Exiting program.")
+        if code != 0:
+            logger.error(f"Exiting with error code: {code}")
+            # log calling stack for debugging
+            import traceback
+            logger.error("Stack trace at exit:\n" + traceback.format_exc())
+        else:
+            logger.info("Exiting successfully.")
+        sys.exit(0)
 
     def auto_vote_process(self):
         self.change_state(State.VOTING)
@@ -836,7 +975,6 @@ class TDCCAutomation:
         self.write_vote_info_list()
         return
 
-
     def take_screenshots(self,user_id=None):
         assert self.check_login_as(user_id), "Not logged in as the expected user for taking screenshots."
         
@@ -1018,173 +1156,6 @@ class TDCCAutomation:
         except Exception as e:
             logger.error(f"Screenshot failed for {stock_id}: {e}")
             return 1
-        
-    def write_program_setting(self):
-        config_path = './program_setting.conf'
-        try:
-            content = f"{self.screenshot_mode}|/|{float(self.time_speed*2)}|/|{'@'.join(self.shareholder_ids)}"
-            logger.info(f"Writing program settings with content: {content}")
-            h = hashlib.sha256(content.encode()).hexdigest()
-            with open(config_path, 'w', encoding='utf-8') as f:
-                f.write(f"screenshot_mode:::{self.screenshot_mode}\n")
-                f.write(f"time_speed:::{int(self.time_speed*2)}\n")
-                f.write(f"shareholderIDs:::{'|/|'.join(self.shareholder_ids)}\n")
-                f.write(f"hash:::{h}\n")
-            logger.info("Program settings saved.")
-        except Exception as e:
-            logger.error(f"Failed to save program settings: {e}")
-
-    def vi_program_setting(self):
-        if self.args.yes:
-            logger.info("Auto-confirm mode is enabled. Shouldn't be configuring program settings interactively. Exiting.")
-            self.exit(1)
-        print("\n--- Program Setting Configuration(User Settings) ---")
-        if os.path.exists('./program_setting.conf'):
-            print("Existing program settings found. Do you want to reconfigure? (y/n) [n]: ")
-            while True:
-                m = input().lower()
-                if m in ['y', 'n', '']:
-                    break
-            if m == 'n' or m == '':
-                logger.info("Keeping existing program settings.")
-                return
-        # Screenshot file structure
-        print("--------------------- Screenshot file structure:  ------------------------------")
-        print("1. Current structure (per user folder)")
-        print("2. All in one, {stock_id}_{stock_name}_{account_id}.png")
-        print("3. All in one, {stock_id}_{stock_name}_{user_id}.png")
-        while True:
-            m = input("Select screenshot file structure (1-3) [1]: ")
-            if m in ['1', '2', '3']:
-                break
-        self.screenshot_mode = int(m)
-
-        # set time speed
-        print("--------------------- Run Speed Configuration:  ------------------------------")
-        print("Run speed: (default 2, smaller is faster)")
-        print("set it larger if:")
-        print("    - your computer is slow")
-        print("    - your network is slow")
-        print("    - the TDCC server thinks you are a robot")
-        while True:
-            s = input("Enter run speed (1-30, smaller is faster) [2]: ")
-            if s.isdigit() and 1 <= int(s) <= 30:
-                break
-            if s == "": s = "2"
-        self.time_speed = (int(s)) / 2
-
-        # Set shareholder IDs
-        print("--------------------- Shareholder IDs Configuration:  ------------------------------")
-        print("Enter shareholder IDs (Taiwan citizen ID), one per line, 'end' to finish:")
-        print("Example: A123456789")
-        self.shareholder_ids = []
-        while True:
-            uid = input("> ").strip().upper()
-            if uid == 'END': 
-                if not self.shareholder_ids:
-                    print("At least one shareholder ID is required.")
-                    continue
-                else: 
-                    break
-            if not uid: continue
-            res = self.id_check(uid)
-            if res == 0: self.shareholder_ids.append(uid)
-            else: print(f"Invalid ID: {uid} (Error reason: { 'Format error' if res == 1 else 'Check digit error' if res == 2 else 'Unknown error' })")
-        
-        # print for confirmation
-        print("\nCurrent Settings:")
-        print(f"Screenshot Mode: {self.screenshot_mode}: {'Per user folders' if self.screenshot_mode == 1 else 'All in one with account ID' if self.screenshot_mode == 2 else 'All in one with user ID'}")
-        print(f"Time Speed: {self.time_speed*2}")
-        print(f"Shareholder IDs: {', '.join(self.shareholder_ids)}")
-        while True:
-            confirm = input("Is this correct? (y/n): ").lower()
-            if confirm in ['y', 'n']:
-                break
-        if confirm == 'y':
-            self.write_program_setting()
-        else:
-            print("Settings not saved. Please reconfigure.")
-            return self.vi_program_setting()
-
-    def write_vote_setting(self):
-        config_path = './vote_setting.conf'
-        self.vote_settings['manual_vote'] = any(self.vote_settings[a] for a in ['accept', 'opposite', 'abstain'])
-        try:
-            content = f"{self.vote_settings['default']}|/|{'#'.join(self.vote_settings['accept'])}|/|{'$'.join(self.vote_settings['opposite'])}|/|{'%'.join(self.vote_settings['abstain'])}|/|{self.vote_settings['manual_vote']}"
-            h = hashlib.sha256(content.encode()).hexdigest()
-            # logger.info(content)
-            with open(config_path, 'w', encoding='utf-8') as f:
-                f.write(f"default:::{self.vote_settings['default']}\n")
-                f.write(f"accept:::{'|/|'.join(self.vote_settings['accept'])}\n")
-                f.write(f"opposite:::{'|/|'.join(self.vote_settings['opposite'])}\n")
-                f.write(f"abstain:::{'|/|'.join(self.vote_settings['abstain'])}\n")
-                f.write(f"manual_vote:::{self.vote_settings['manual_vote']}\n")
-                f.write(f"hash:::{h}\n")
-            logger.info("Vote settings saved.")
-        except Exception as e:
-            logger.error(f"Failed to save vote settings: {e}")
-
-    def write_vote_info_list(self):
-        path = f"{self.base_path}/incomplete_screenshot_list.json"
-        with open(path, 'w', encoding='utf-8') as f:
-            json.dump(self.vote_info_list, f)
-        # logger.info(f"Write unfinished tasks: {self.vote_info_list}")
-
-    def vi_vote_setting(self):
-        if self.args.yes:
-            logger.info("Auto-confirm mode is enabled. Shouldn't be configuring vote settings interactively. Exiting.")
-            self.exit(1)
-        
-        if os.path.exists('./vote_setting.conf'):
-            print("Existing vote settings found. Do you want to reconfigure? (y/n) [n]: ")
-            while True:
-                m = input().lower()
-                if m in ['y', 'n', '']:
-                    break
-            if m == 'n' or m == '':
-                logger.info("Keeping existing vote settings.")
-                return
-    
-        print("\n--------------------- Vote Setting Configuration:  ------------------------------")
-        d = input("Default vote option (accept/opposite/abstain) [abstain]: ").lower()
-        self.vote_settings['default'] = d if d in ['accept', 'opposite', 'abstain'] else 'abstain'
-
-        for action in ['accept', 'opposite', 'abstain']:
-            print(f"\n--------------------- Manual vote keywords for '{action}' option:  ------------------------------")
-            print(f"Keywords to {action} (one per line, 'end' to finish):")
-            self.vote_settings[action] = []
-            while True:
-                kw = input("> ").strip()
-                if kw.lower() == 'end': break
-                if kw: self.vote_settings[action].append(kw)
-        
-        self.vote_settings['manual_vote'] = any(self.vote_settings[a] for a in ['accept', 'opposite', 'abstain'])
-        
-        # check keywords do not overlap
-        all_keywords = self.vote_settings['accept'] + self.vote_settings['opposite'] + self.vote_settings['abstain']
-        if len(all_keywords) != len(set(all_keywords)):
-            print("Error: Keywords cannot overlap between categories.")
-            return self.vi_vote_setting()
-        
-        # default vote option cannot have keywords
-        if self.vote_settings[self.vote_settings['default']]:
-            self.vote_settings[self.vote_settings['default']] = []
-            
-        # print for confirmation
-        print("\nCurrent Vote Settings:")
-        print(f"Default Vote: {self.vote_settings['default']}")
-        print(f"Accept Keywords: {', '.join(self.vote_settings['accept'])}")
-        print(f"Opposite Keywords: {', '.join(self.vote_settings['opposite'])}")
-        print(f"Abstain Keywords: {', '.join(self.vote_settings['abstain'])}")
-        while True:
-            confirm = input("Is this correct? (y/n): ").lower()
-            if confirm in ['y', 'n']:
-                break
-        if confirm == 'y':
-            self.write_vote_setting()
-        else:
-            print("Settings not saved. Please reconfigure.")
-            return self.vi_vote_setting()
 
     def main_menu(self):
         while True:
