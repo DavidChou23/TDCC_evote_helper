@@ -547,7 +547,7 @@ class TDCCAutomation:
         while time.time() - start_time < 90:  # 1.5 minute timeout
             time.sleep(2)
             # Check for Maintenance
-            if "系統維護中" in self.driver.page_source:
+            if "系統維護中" in self.driver.find_element(By.TAG_NAME, 'body').text:
                 logger.error("System Maintenance detected.")
                 self.exit(1)
                 
@@ -643,11 +643,11 @@ class TDCCAutomation:
                 
                 self.perform_vote_logic()
                 
-                if "系統維護中" in self.driver.page_source:
+                if "系統維護中" in self.driver.find_element(By.TAG_NAME, 'body').text:
                     logger.error("System Maintenance detected during voting.")
                     self.exit(1)
                 
-                if "系統操作逾時" in self.driver.page_source:
+                if "系統操作逾時" in self.driver.find_element(By.TAG_NAME, 'body').text:
                     logger.warning("Session timeout detected during voting. Please restart the program and try again.")
                     self.exit(1)
 
@@ -668,24 +668,26 @@ class TDCCAutomation:
         self.driver.maximize_window()
         """Inner logic for clicking options within a stock's voting page."""
         while True:
-            if "投票已完成" in self.driver.page_source:
+            # System Message Handling
+            if "投票已完成" in self.driver.find_element(By.TAG_NAME, 'body').text:
                 logger.info("Vote already completed for this stock.")
                 self.driver.find_element(By.CSS_SELECTOR,'button[onclick="doProcess();"]').click()
                 return
             
-            if "我不是機器人驗證失敗" in self.driver.page_source:
+            # on viewable page text contain "我不是機器人驗證失敗"
+            if "我不是機器人驗證失敗" in self.driver.find_element(By.TAG_NAME, 'body').text:
                 logger.warning("CAPTCHA verification failed. Please complete it manually.")
                 self.show_msg("Please complete CAPTCHA", 0, "Waiting for user...")
-                while "我不是機器人驗證失敗" in self.driver.page_source:
+                while "我不是機器人驗證失敗" in self.driver.find_element(By.TAG_NAME, 'body').text:
                     time.sleep(3)
                 logger.info("CAPTCHA completed. Resuming vote logic.")
                 continue
             
-            if "系統操作逾時" in self.driver.page_source:
+            if "系統操作逾時" in self.driver.find_element(By.TAG_NAME, 'body').text:
                 logger.warning("Session timeout detected. Please restart the program and try again.")
                 self.exit(1)
 
-            if "系統維護中" in self.driver.page_source:
+            if "系統維護中" in self.driver.find_element(By.TAG_NAME, 'body').text:
                 logger.error("System Maintenance detected during voting.")
                 self.exit(1)
 
@@ -693,8 +695,11 @@ class TDCCAutomation:
                 wait = WebDriverWait(self.driver, 10)
                 # Default options (Accept/Opposite/Abstain all)
                 option_idx = {"accept": 1, "opposite": 2, "abstain": 3}.get(self.vote_settings['default'], 3)
-                
-                if "議案投票" in self.driver.page_source:
+                if "系統回覆訊息" in self.driver.find_element(By.TAG_NAME, 'body').text:
+                    pass
+                elif "議案表決情形" in self.driver.find_element(By.TAG_NAME, 'body').text:
+                    pass
+                elif "議案投票" in self.driver.find_element(By.TAG_NAME, 'body').text:
                     # Click the header button for default vote
                     try:
                         header_btn = self.driver.find_element(By.CSS_SELECTOR, f'table.c-votelist_docSection tr:nth-child(2) td:nth-child(2) a:nth-child({option_idx})')
@@ -718,7 +723,7 @@ class TDCCAutomation:
                                     time.sleep(0.3)
                                     logger.info(f"Manual vote override: {text} -> {value}")
                                 except: pass
-                elif "選舉" in self.driver.page_source:
+                elif "選舉" in self.driver.find_element(By.TAG_NAME, 'body').text:
                     # Candidate voting (usually skip/abstain all as per original)
                     try:
                         self.driver.find_element(By.CSS_SELECTOR, 'a[href="javascript:giveUp();"]').click()
