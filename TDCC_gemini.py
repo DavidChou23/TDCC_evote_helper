@@ -623,7 +623,15 @@ class TDCCAutomation:
                 logger.info(f"Voting for Stock: {stock_id}")
                 
                 # Click "Vote" link
-                target_row.find_element(By.TAG_NAME, 'a')[0].click()
+                links = target_row.find_elements(By.TAG_NAME, 'a')
+                for link in links:
+                    if "投票" in link.text:
+                        link.click()
+                        break
+                else:
+                    logger.warning(f"No vote link found for stock {stock_id}. Skipping.")
+                    logger.debug(f"Row text: {target_row.text}")
+                    continue
                 time.sleep(2)
                 
                 # Handle possible dialog
