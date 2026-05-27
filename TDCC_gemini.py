@@ -605,6 +605,9 @@ class TDCCAutomation:
             logger.error("Failed to load voting page.")
             return self.auto_vote_process()  # Retry loading the page
 
+        # set window to fullscreen
+        self.driver.maximize_window()
+
         logger.info("Voting page loaded. Starting vote loop...")
         while True:
             time.sleep(2 * self.time_speed)
@@ -662,6 +665,7 @@ class TDCCAutomation:
     def perform_vote_logic(self):
         assert self.check_login_as(self.current_user), "Not logged in as the expected user for performing vote logic."
         
+        self.driver.maximize_window()
         """Inner logic for clicking options within a stock's voting page."""
         while True:
             if "投票已完成" in self.driver.page_source:
@@ -783,9 +787,11 @@ class TDCCAutomation:
         
         #get csv download link(//div[@id='downloadMeetingList']/a)
         link = self.driver.find_element(By.XPATH, "//div[@id='downloadMeetingList']/a")
+        # scroll to the link
+        self.driver.execute_script("arguments[0].scrollIntoView();", link)
         #download csv content(click the link and wait for download to complete)
         link.click()
-        time.sleep(10)
+        time.sleep(5)
         #find the latest downloaded csv file in tmp_download_path and check created time to ensure it's the correct file
         csv_file = None
         dir_list = os.listdir(self.tmp_download_path)
@@ -811,10 +817,15 @@ class TDCCAutomation:
         with open(os.path.join(self.tmp_download_path, csv_file), 'r', encoding='utf-8') as f:
             reader = csv.reader(f)
             for row in reader:
+                if len(row) < 7:  continue
                 if row[6].strip() == "已投票":
-                    stocks.append(row[0].strip())
+                    stocks.append(row[0].replace("=", '').replace('"', '').replace("'", "").strip())
+
         logger.info(f"Screenshotable stocks for {user_id}: {stocks}")
-        self.vote_info_list[user_id].extend(stocks)
+        try:
+            self.vote_info_list[user_id].extend(stocks)
+        except KeyError:
+            self.vote_info_list[user_id] = stocks
         self.write_vote_info_list()
         return
 
