@@ -1289,6 +1289,13 @@ def parse_args():
     return parser.parse_args()
 
 if __name__ == "__main__":
+    # if 00:00~7:00, show message and exit
+    current_hour = datetime.datetime.now().hour
+    if 0 <= current_hour < 7:
+        print("The TDCC system is usually under maintenance from 00:00 to 07:00. Please run the program after 07:00.")
+        input("Press Enter to Exit...")
+        sys.exit(0)
+
     args = parse_args()
     if os.path.exists("running.lock"):
         #if the previous process is terminated but the lock file still exists, check if the process is still running by checking the pid in the lock file
