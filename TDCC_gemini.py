@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
-# author: Gemini CLI (Reconstructed from DavidChou's TDCC_helper_tool)
-# date: 2026/5/25
+# author: DavidChou (Reconstructed from DavidChou's TDCC_helper_tool)
+# date: 2026/5/28
 
 import os
 import sys
