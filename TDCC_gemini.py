@@ -903,16 +903,16 @@ class TDCCAutomation:
             try:
                 # wait for table to load
                 wait = WebDriverWait(self.driver, 10)
-                table = wait.until(EC.presence_of_element_located((By.XPATH, '//table[0]//tr')))
-                for row in table:
-                    if "戶號" in row.text:
-                        account_id = row.find_element(By.XPATH, '//td').text.strip()
+                table = wait.until(EC.presence_of_element_located((By.XPATH, '//table[1]')))
+                for row in table.find_elements(By.TAG_NAME, 'tr'):
+                    if ("戶號" in row.text):
+                        account_id = row.find_element(By.TAG_NAME, 'td').text.strip()
                         break
             except: pass
 
 
             # adjust window size
-            timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+            timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M")
             filename = f"{stock_id}_{stock_name}_{timestamp}.png"
             
             if self.screenshot_mode == 1:
