@@ -15,6 +15,7 @@ import logging
 import subprocess
 from enum import Enum, auto
 from typing import List, Dict, Optional
+import json
 
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -238,26 +239,83 @@ class TDCCAutomation:
             logger.info("Loaded vote settings.")
         except Exception as e:
             logger.error(f"Error reading vote settings: {e}")
+    def read_voteinfolist_old(self, file_full_path):
+        # for compatibility with old version, used to change file structure from txt to json
+        file_full_path = file_full_path.replace("\\\\","\\").replace("\\","/")  # windows path compatibility
+        assert os.path.exists(file_full_path), f"File not found: {file_full_path}"
+        user_id = str(os.path.dirname(file_full_path).split("/")[-1])
+        assert self.id_check(user_id) == 0, f"Invalid user ID: {user_id}"
 
+        with open(file_full_path, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+            for line in lines:
+                stock_id = line.strip()
+                if stock_id not in self.vote_info_list:
+                    try:
+                        self.vote_info_list[user_id].append(stock_id)
+                    except AttributeError:
+                        if(self.debug>=3):
+                            print(self.vote_info_list)
+                            print(user_id, stock_id)
+                        self.vote_info_list[user_id] = [stock_id]
+                    except KeyError:
+                        self.vote_info_list[user_id] = [stock_id]
+    
     def read_vote_info_list(self):
-        folder_list = [f for f in os.listdir(self.base_path) if os.path.isdir(os.path.join(self.base_path, f))]
-        for folder in folder_list:
-            if folder == "all": continue
-            path = os.path.join(self.base_path, folder, "incomplete_screenshot_list.txt")
-            if os.path.exists(path):
-                with open(path, 'r', encoding='utf-8') as f:
-                    stocks = [line.strip() for line in f if line.strip()]
-                    if stocks:
-                        self.vote_info_list[folder] = stocks
-            else:
-                #if folder empty--> rmdir and continue
-                if not os.listdir(os.path.join(self.base_path, folder)):
-                    os.rmdir(os.path.join(self.base_path, folder))
-                    continue
-                # touch incomplete_screenshot_list.txt
-                with open(path, 'w', encoding='utf-8') as f:
-                    f.write("")
-        logger.info(f"Read unfinished tasks: {self.vote_info_list}")
+        path = f"{self.base_path}/incomplete_screenshot_list.json"
+        #file is empty
+        if os.path.getsize(path) == 0:
+            self.vote_info_list = {}
+            return
+        
+        #file exists
+        if os.path.exists(path):
+            with open(path, 'r', encoding='utf-8') as f:
+                self.vote_info_list = json.load(f)
+        # compatibility with old version, if there are any folders with incomplete_screenshot_list.txt, read them and convert to json format, then delete the txt files
+        ## list all file named incomplete_screenshot_list.txt in base_path and subfolders
+        txt_files = []
+        for root, dirs, files in os.walk(self.base_path):
+            for file in files:
+                if file == "incomplete_screenshot_list.txt" or file == "imcomplele_screenshot_list.txt":
+                    txt_files.append(os.path.join(root, file))
+        for txt_file in txt_files:
+            try:
+                logger.info(f"Converting old format: {txt_file}")
+                self.read_voteinfolist_old(txt_file)
+                os.remove(txt_file)
+                self.write_vote_info_list()  # write after each file to ensure data is not lost if there are many files
+                logger.info(f"Converted old format and removed: {txt_file}")
+            except Exception as e:
+                logger.error(f"Error converting old format for {txt_file}: {e}")
+
+    # not code review yet
+    def show_msg(self, txt1, timeout_sec, txt2):
+        """In-browser message display using JS."""
+        def run_msg():
+            try:
+                self.driver.execute_script("""
+                    if (!document.getElementById('gemini-msg')) {
+                        var div = document.createElement('div');
+                        div.id = 'gemini-msg';
+                        div.style.position = 'fixed'; div.style.top = '15px'; div.style.left = '10px';
+                        div.style.padding = '10px'; div.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
+                        div.style.color = '#00ff00'; div.style.fontSize = '16px'; div.style.zIndex = '9999';
+                        document.body.appendChild(div);
+                    }
+                """)
+                if timeout_sec > 0:
+                    for i in range(timeout_sec, 0, -1):
+                        self.driver.execute_script(f"document.getElementById('gemini-msg').innerText = '{txt1} ({i}s)';")
+                        time.sleep(1)
+                else:
+                    self.driver.execute_script(f"document.getElementById('gemini-msg').innerText = '{txt1}';")
+                    time.sleep(2)
+                self.driver.execute_script(f"document.getElementById('gemini-msg').innerText = '{txt2}';")
+                time.sleep(1)
+                self.driver.execute_script("document.getElementById('gemini-msg').remove();")
+            except: pass
+        threading.Thread(target=run_msg, daemon=True).start()
 
     def open_browser(self):
         self.change_state(State.INITIALIZING)
