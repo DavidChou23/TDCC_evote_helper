@@ -94,6 +94,18 @@ class TDCCAutomation:
         os.chdir(script_dir)
         logger.info(f"Working directory: {os.getcwd()}")
 
+        # log rotate(keep 14 days of logs and remove older logs)
+        log_files = [f for f in os.listdir("./log") if f.startswith("tdcc_automation_") and f.endswith(".log")]
+        for log_file in log_files:
+            log_date_str = log_file[len("tdcc_automation_"):-len(".log")]
+            try:
+                log_date = datetime.datetime.strptime(log_date_str, "%Y%m%d")
+                if (datetime.datetime.now() - log_date).days > 14:
+                    os.remove(os.path.join("./log", log_file))
+                    logger.info(f"Removed old log file: {log_file}")
+            except ValueError:
+                logger.warning(f"Unexpected log file name format: {log_file}")
+    
     def id_check(self, id_number: str) -> int:
         """
         Check the validity of a Taiwan citizen ID number.
