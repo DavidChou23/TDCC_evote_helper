@@ -729,18 +729,44 @@ class TDCCAutomation:
                     except: 
                         logger.warning("Unknown voting page type.")
                         pass
+                
+                # Buttons
+                try:
+                    #小視窗下一步(棄權警告視窗1，for 議案)
+                    ignore_btns = self.driver.find_element(By.CSS_SELECTOR,'button[onclick="voteObj.ignoreVote();voteObj.goNext(); return false;"]')
                     
-                # Proceed steps
-                for _ in range(4): # Multiple "Next" or "Confirm" steps
-                    try:
-                        # 下一步/棄權警告/確認投票
-                        next_btns = self.driver.find_elements(By.CSS_SELECTOR, 'button[onclick*="checkVote"], button[onclick*="ignoreVote"], button[onclick*="checkMeetingPartner"]')
-                        for btn in next_btns:
-                            if btn.is_displayed():
+                    for btn in ignore_btns:
+                        if btn.is_displayed():
+                            try: 
                                 btn.click()
-                                time.sleep(2)
-                    except: pass
-    
+                                break
+                            except: pass
+                            time.sleep(2)
+                except: pass
+                try:
+                    #小視窗下一步(棄權警告視窗2，for 選舉)--->  "; return false;" vs ";return false;" 可能會有一點點差異，導致無法被找到，所以兩種寫法都嘗試
+                    ignore_btns = self.driver.find_element(By.CSS_SELECTOR,'button[onclick="voteObj.ignoreVote();voteObj.goNext();return false;"]')
+                    
+                    for btn in ignore_btns:
+                        if btn.is_displayed():
+                            try: 
+                                btn.click()
+                                break
+                            except: pass
+                            time.sleep(2)
+                except: pass
+                try:
+                    # 下一步/棄權警告/確認投票
+                    next_btns = self.driver.find_elements(By.CSS_SELECTOR, 'button[onclick*="checkVote"], button[onclick*="ignoreVote"], button[onclick*="checkMeetingPartner"]')
+                    for btn in next_btns:
+                        if btn.is_displayed():
+                            try: 
+                                btn.click()
+                                break
+                            except: pass
+                            time.sleep(2)
+                except: pass
+
             except Exception as e:
                 logger.error(f"Perform vote logic failed: {e}")
     def get_all_screenshotable_stocks(self, user_id):
