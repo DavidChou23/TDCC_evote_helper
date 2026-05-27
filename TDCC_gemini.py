@@ -1117,6 +1117,12 @@ class TDCCAutomation:
         except Exception as e:
             logger.error(f"Failed to save vote settings: {e}")
 
+    def write_vote_info_list(self):
+        path = f"{self.base_path}/incomplete_screenshot_list.json"
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(self.vote_info_list, f)
+        # logger.info(f"Write unfinished tasks: {self.vote_info_list}")
+
     def vi_vote_setting(self):
         if self.args.yes:
             logger.info("Auto-confirm mode is enabled. Shouldn't be configuring vote settings interactively. Exiting.")
