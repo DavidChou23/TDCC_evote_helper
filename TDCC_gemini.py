@@ -895,7 +895,18 @@ class TDCCAutomation:
             except: pass
 
             # resize for uniform screenshots
+            ## set zoom 
             self.driver.execute_script("document.body.style.zoom = '120%'")
+            try:
+                ## get target barcode location and adjust window size accordingly (some pages have more content below the barcode, e.g. vote date, so we need to make sure it's all visible in the screenshot)
+                votedate_pic = self.driver.find_element(By.CSS_SELECTOR,'div[class="u-width--100 u-t_align--right"]')
+                self.driver.set_window_size(516, votedate_pic.location['y']+votedate_pic.size['height']+370)
+            except: #eGift cause votedate_pic not found, set to a reasonable default
+                self.driver.set_window_size(516, 400)
+            ## scroll to top to avoid any unwanted content above
+            for _ in range(5):
+                js="var q=document.documentElement.scrollTop=0"
+                self.driver.execute_script(js) 
             time.sleep(1)
             
             # Prepare filename based on mode
