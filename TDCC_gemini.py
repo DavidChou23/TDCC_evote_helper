@@ -690,8 +690,9 @@ class TDCCAutomation:
             if "系統維護中" in self.driver.find_element(By.TAG_NAME, 'body').text:
                 logger.error("System Maintenance detected during voting.")
                 self.exit(1)
-
+            time.sleep(5 * self.time_speed)
             try:
+                # vote
                 wait = WebDriverWait(self.driver, 10)
                 # Default options (Accept/Opposite/Abstain all)
                 option_idx = {"accept": 1, "opposite": 2, "abstain": 3}.get(self.vote_settings['default'], 3)
@@ -704,7 +705,7 @@ class TDCCAutomation:
                     try:
                         header_btn = self.driver.find_element(By.CSS_SELECTOR, f'table.c-votelist_docSection tr:nth-child(2) td:nth-child(2) a:nth-child({option_idx})')
                         header_btn.click()
-                        time.sleep(1)
+                        time.sleep(5*self.time_speed)
                     except: pass
     
                     # Manual overrides based on keywords
@@ -720,7 +721,7 @@ class TDCCAutomation:
                             if value:
                                 try:
                                     row.find_element(By.CSS_SELECTOR, f'input[value="{value}"]').click()
-                                    time.sleep(0.3)
+                                    time.sleep(0.5)
                                     logger.info(f"Manual vote override: {text} -> {value}")
                                 except: pass
                 elif "選舉" in self.driver.find_element(By.TAG_NAME, 'body').text:
@@ -1362,7 +1363,7 @@ if __name__ == "__main__":
                 if args.yes:
                     sys.exit(1)
                 input("Press Enter to Exit...")
-                sys.exit(1)
+                sys.exit(0)
             else:
                 logger.warning(f"Stale lock file detected. Previous process (PID: {pid}) is not running. Removing lock file.")
                 if process.is_running():
