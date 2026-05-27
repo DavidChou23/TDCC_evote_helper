@@ -137,26 +137,38 @@ class TDCCAutomation:
         # assert user_id==self.current_user, f"check_login_as called with user_id {user_id} but current_user is {self.current_user}"
         if user_id is None:
             return False
-
+        new_tab_opened = False
         #open a temp new tab to check if already logged in as user_id
-        logger.info(f"Checking if already logged in as {user_id}")
-        # self.driver.execute_script("window.open('');")
-        # self.driver.switch_to.window(self.driver.window_handles[-1])
-        # self.driver.get("https://stockservices.tdcc.com.tw/evote/login/shareholder.html?language=TW")
-        # # wait for page load
-        # try:
-        #     WebDriverWait(self.driver, 30).until(EC.presence_of_element_located((By.TAG_NAME, 'html')))
-        # except TimeoutException:
-        #     logger.error("Failed to load login page.")
-        #     return
+        # logger.info(f"Checking if already logged in as {user_id}")
+        if "系統回覆訊息" in self.driver.find_element(By.TAG_NAME, 'body').text:
+            self.driver.execute_script("window.open('');")
+            new_tab_opened = True
+            self.driver.switch_to.window(self.driver.window_handles[-1])
+            self.driver.get("https://stockservices.tdcc.com.tw/evote/login/shareholder.html?language=TW")
+            # wait for page load
+            try:
+                WebDriverWait(self.driver, 30).until(EC.presence_of_element_located((By.TAG_NAME, 'html')))
+            except TimeoutException:
+                logger.error("Failed to load login page.")
+                # close the new tab if opened
+                if new_tab_opened:
+                    self.driver.close()
+                    self.driver.switch_to.window(self.driver.window_handles[0])
+                return
         
         #check is it in page_source(exclude any "input" tag)
         filtered_source = self.driver.page_source
         for tag_name in ['input', 'textarea', 'select']:
             for tag in self.driver.find_elements(By.TAG_NAME, tag_name):
-                filtered_source = filtered_source.replace(tag.get_attribute('outerHTML'), '')
+                try:filtered_source = filtered_source.replace(tag.get_attribute('outerHTML'), '')
+                except TypeError: pass  # In case get_attribute returns None
+                except Exception as e: logger.error(f"Error filtering tag {tag_name}: {e}")
+        # close the new tab if opened
+        if new_tab_opened:
+            self.driver.close()
+            self.driver.switch_to.window(self.driver.window_handles[0])
         if str(user_id) in filtered_source:
-            logger.info(f"Already logged in as {user_id}.")
+            # logger.info(f"Already logged in as {user_id}.")
             self.current_user = user_id
             # self.driver.close()
             # self.driver.switch_to.window(self.driver.window_handles[0])
