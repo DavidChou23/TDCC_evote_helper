@@ -11,4 +11,5 @@ screenshots/
 *.spec
 *.html
 *.bak
+*.lock
 todo.txt

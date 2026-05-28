@@ -286,6 +286,13 @@ class TDCCAutomation:
                         self.vote_info_list[user_id] = [stock_id]
     
     def read_vote_info_list(self):
+        """
+        self.vote_info_list structure:
+        {
+            "A123456789": ["2330", "2317"],
+            "A123456789_voting": "1234"
+        }
+        """
         path = f"{self.base_path}/incomplete_screenshot_list.json"
         #file is empty
         if os.path.getsize(path) == 0:
@@ -516,6 +523,8 @@ class TDCCAutomation:
             logger.warning("WebDriver is already initialized. Skipping browser initialization.")
             return
         def build_browser_options(browser_name: str):
+            # set default download directory and disable download prompts for different browsers
+            # change user agent to mimic real user and avoid being detected as a bot, also set some common options to improve compatibility with TDCC website
             download_dir = os.path.abspath(self.tmp_download_path)
             if browser_name in ("Edge", "Chrome"):
                 options = webdriver.EdgeOptions() if browser_name == "Edge" else webdriver.ChromeOptions()
@@ -526,6 +535,8 @@ class TDCCAutomation:
                     "safebrowsing.enabled": True,
                 }
                 options.add_experimental_option("prefs", prefs)
+                options.add_argument("--disable-blink-features=AutomationControlled")
+                options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/")
                 return options
 
             if browser_name == "Firefox":
@@ -536,6 +547,8 @@ class TDCCAutomation:
                 options.set_preference("browser.download.dir", download_dir)
                 options.set_preference("browser.helperApps.neverAsk.saveToDisk", "text/csv,application/csv,text/plain,application/octet-stream")
                 options.set_preference("pdfjs.disabled", True)
+                options.add_argument("--disable-blink-features=AutomationControlled")
+                options.set_preference("general.useragent.override", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:104.0) Gecko/20100101 Firefox/104.0")
                 return options
 
             return None
@@ -779,7 +792,7 @@ class TDCCAutomation:
                 # Handle possible dialog
                 try: self.driver.find_element(By.ID, "msgDialog_okBtn").click()
                 except: pass
-                
+                self.vote_info_list[f"{self.current_user}_voting"] = stock_id  # Mark current voting stock for screenshot tracking
                 self.perform_vote_logic()
                 
                 if "系統維護中" in self.driver.find_element(By.TAG_NAME, 'body').text:
@@ -795,6 +808,7 @@ class TDCCAutomation:
                     self.vote_info_list[self.current_user] = []
                 if stock_id not in self.vote_info_list[self.current_user]:
                     self.vote_info_list[self.current_user].append(stock_id)
+                    self.vote_info_list.pop(f"{self.current_user}_voting", None)  # Clear current voting marker
                 self.write_vote_info_list()
                 
             except Exception as e:
@@ -811,7 +825,7 @@ class TDCCAutomation:
             if "投票已完成" in self.driver.find_element(By.TAG_NAME, 'body').text:
                 logger.info("Vote already completed for this stock.")
                 self.driver.find_element(By.CSS_SELECTOR,'button[onclick="doProcess();"]').click()
-                return
+                return 0
             
             # on viewable page text contain "我不是機器人驗證失敗"
             if "我不是機器人驗證失敗" in self.driver.find_element(By.TAG_NAME, 'body').text:
@@ -857,7 +871,8 @@ class TDCCAutomation:
                             if any(k in text for k in self.vote_settings['accept']): value = "A"
                             elif any(k in text for k in self.vote_settings['opposite']): value = "O"
                             elif any(k in text for k in self.vote_settings['abstain']): value = "C"
-    
+                            time.sleep(0.6)
+
                             if value:
                                 try:
                                     row.find_element(By.CSS_SELECTOR, f'input[value="{value}"]').click()
@@ -868,7 +883,7 @@ class TDCCAutomation:
                     # Candidate voting (usually skip/abstain all as per original)
                     try:
                         self.driver.find_element(By.CSS_SELECTOR, 'a[href="javascript:giveUp();"]').click()
-                        time.sleep(1)
+                        time.sleep(3*self.time_speed)
                     except: pass
                 else:
                     # unhandled type, log content for debugging
@@ -919,6 +934,36 @@ class TDCCAutomation:
 
             except Exception as e:
                 logger.error(f"Perform vote logic failed: {e}")
+                
+    def check_vote_completion(self, stock_id):
+        assert self.current_user is not None, "Current user is not set for voting process."
+        assert self.check_login_as(self.current_user), "Not logged in as the expected user for checking vote completion."
+        
+        try:
+            self.driver.get("https://stockservices.tdcc.com.tw/evote/shareholder/000/tc_estock_welshas.html")
+            # wait for page load
+            try:
+                search_box = WebDriverWait(self.driver, 20).until(EC.presence_of_element_located((By.NAME, 'qryStockId')))
+            except TimeoutException:
+                logger.error("Failed to load voting page.")
+                return self.check_vote_completion(stock_id)  # Retry loading the page
+            search_box.clear()
+            search_box.send_keys(stock_id)
+            self.driver.find_element(By.CSS_SELECTOR, 'a[onclick="qryByStockId();"]').click()
+            time.sleep(2)
+            # check if all rows are "已投票"
+            rows = self.driver.find_elements(By.TAG_NAME, 'tr')
+            for row in rows:
+                if stock_id in row.text and "未投票" in row.text:
+                    search_box.clear()  # Clear search box for next check
+                    return False
+            search_box.clear()  # Clear search box for next check
+            return True
+        except Exception as e:
+            logger.error(f"Error checking vote completion for stock {stock_id}: {e}")
+            search_box.clear()  # Clear search box in case of error
+            return False
+        
     def get_all_screenshotable_stocks(self, user_id):
         assert self.check_login_as(user_id), "Not logged in as the expected user for getting screenshotable stocks."
         
@@ -1280,7 +1325,8 @@ class TDCCAutomation:
         
         self.load_configs()
         
-        # Check for unfinished tasks
+        # Check for unfinished screenshoot tasks
+        # after this, vote_info_list shouldn't contain anykey with "_voting" suffix, because if there is any, it means the voting task is not completed, and we will handle it in the next step, either move the stock id to screenshot list if voting is actually completed but just terminated unexpectedly, or just remove the _voting key if voting is not completed yet, to avoid confusion in the future
         if self.vote_info_list:
             # while True:
             #     print("Unfinished screenshot tasks detected for the following users:")
@@ -1293,13 +1339,37 @@ class TDCCAutomation:
             choice = 'y'   
             if self.args.yes or choice == 'y':
                 self.open_browser()
-                for uid in list(self.vote_info_list.keys()):
+                for uid in list(sorted(self.vote_info_list.keys(), reverse=True)):  # sort by user id for consistent order
                     if not self.vote_info_list[uid]:  # only attempt if there are pending stocks
                         continue
+                    if uid.endswith("_voting"):
+                        #check uid key exist
+                        try:
+                            original_uid = uid.replace("_voting", "")
+                            if original_uid in self.vote_info_list:
+                                pass
+                        except KeyError:
+                            self.vote_info_list[original_uid] = []
+                            
+                        # check does voting task finished? or just terminate unexpectedly but submitted
+                        if self.login(uid.replace("_voting", "")):
+                            # if voting is complete(indicated the lastest session is terminated unexpectedly but already submitted), move the stock id to screenshot list, otherwise just skip and wait for next time to continue voting
+                            if self.check_vote_complete(self.vote_info_list[uid])==True:
+                                logger.info(f"Voting task for user {uid} is already completed. Proceeding to screenshots.")
+                                self.vote_info_list[uid.replace("_voting", "")].append(self.vote_info_list[uid]) # move stock id to screenshot list
+                                self.write_vote_info_list()
+                            else:
+                                logger.info(f"Voting task for user {uid} is not completed. Skipping.")
+                                self.vote_info_list.pop(uid) # remove the _voting key to avoid confusion in the future
+                                self.write_vote_info_list()
+                            continue # screenshoot with other stocks
                     if self.login(uid):
                         self.take_screenshots(uid)
                         # self.logout()
 
+        tmp_keys = list(self.vote_info_list.keys())
+        assert all(not k.endswith("_voting") for k in tmp_keys), "Should not have any key with _voting suffix in vote_info_list after handling unfinished tasks, please check the logic for handling unfinished tasks."
+        
         self.main_menu()
         self.cleanup()
         self.change_state(State.FINISH)
