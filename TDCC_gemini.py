@@ -25,6 +25,12 @@ from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException
 
+# chdir
+script_dir = os.path.dirname(os.path.abspath(__file__))
+# for pyinstaller
+if getattr(sys, 'frozen', False):
+    script_dir = os.path.dirname(sys.executable)
+os.chdir(script_dir)
 
 if not os.path.exists("./log"):
     os.makedirs("./log")
@@ -140,6 +146,7 @@ class TDCCAutomation:
         new_tab_opened = False
         #open a temp new tab to check if already logged in as user_id
         # logger.info(f"Checking if already logged in as {user_id}")
+        WebDriverWait(self.driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, 'body')))
         if "系統回覆訊息" in self.driver.find_element(By.TAG_NAME, 'body').text:
             self.driver.execute_script("window.open('');")
             new_tab_opened = True
@@ -535,8 +542,8 @@ class TDCCAutomation:
                     "safebrowsing.enabled": True,
                 }
                 options.add_experimental_option("prefs", prefs)
-                options.add_argument("--disable-blink-features=AutomationControlled")
-                options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/")
+                # options.add_argument("--disable-blink-features=AutomationControlled")
+                # options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/")
                 return options
 
             if browser_name == "Firefox":
@@ -547,8 +554,8 @@ class TDCCAutomation:
                 options.set_preference("browser.download.dir", download_dir)
                 options.set_preference("browser.helperApps.neverAsk.saveToDisk", "text/csv,application/csv,text/plain,application/octet-stream")
                 options.set_preference("pdfjs.disabled", True)
-                options.add_argument("--disable-blink-features=AutomationControlled")
-                options.set_preference("general.useragent.override", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:104.0) Gecko/20100101 Firefox/104.0")
+                # options.add_argument("--disable-blink-features=AutomationControlled")
+                # options.set_preference("general.useragent.override", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:104.0) Gecko/20100101 Firefox/104.0")
                 return options
 
             return None
@@ -656,6 +663,7 @@ class TDCCAutomation:
         start_time = time.time()
         while time.time() - start_time < 90:  # 1.5 minute timeout
             time.sleep(2)
+            WebDriverWait(self.driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, 'body')))
             # Check for Maintenance
             if "系統維護中" in self.driver.find_element(By.TAG_NAME, 'body').text:
                 logger.error("System Maintenance detected.")
@@ -721,6 +729,11 @@ class TDCCAutomation:
             try:
                 os.remove("./statement.html")
             except FileNotFoundError: pass
+        except FileNotFoundError: pass
+        except PermissionError as e:
+            logger.error(f"Permission error during cleanup: {e}. Please check if any files are still open or in use.")
+        except OSError as e:
+            logger.error(f"OS error during cleanup: {e}. Please check file permissions and if any files are still open or in use.")
         except Exception as e:
             logger.error(f"Error during cleanup: {e}")
     
@@ -793,6 +806,7 @@ class TDCCAutomation:
                 try: self.driver.find_element(By.ID, "msgDialog_okBtn").click()
                 except: pass
                 self.vote_info_list[f"{self.current_user}_voting"] = stock_id  # Mark current voting stock for screenshot tracking
+                self.write_vote_info_list()
                 self.perform_vote_logic()
                 
                 if "系統維護中" in self.driver.find_element(By.TAG_NAME, 'body').text:
@@ -865,7 +879,8 @@ class TDCCAutomation:
                     if self.vote_settings['manual_vote']:
                         vote_rows = self.driver.find_elements(By.XPATH, '//td/input[@type="radio"]/../..')
                         for row in vote_rows:
-                            text = row.text
+                            #remove any "input"
+                            text = row.find_element(By.TAG_NAME,'td').text
                             logger.info(text)
                             value = None
                             if any(k in text for k in self.vote_settings['accept']): value = "A"
@@ -955,13 +970,19 @@ class TDCCAutomation:
             rows = self.driver.find_elements(By.TAG_NAME, 'tr')
             for row in rows:
                 if stock_id in row.text and "未投票" in row.text:
+                    search_box = self.driver.find_element(By.NAME, 'qryStockId')
                     search_box.clear()  # Clear search box for next check
+                    self.driver.find_element(By.CSS_SELECTOR, 'a[onclick="qryByStockId();"]').click()
                     return False
+            search_box = self.driver.find_element(By.NAME, 'qryStockId')
             search_box.clear()  # Clear search box for next check
+            self.driver.find_element(By.CSS_SELECTOR, 'a[onclick="qryByStockId();"]').click()
             return True
         except Exception as e:
             logger.error(f"Error checking vote completion for stock {stock_id}: {e}")
+            search_box = self.driver.find_element(By.NAME, 'qryStockId')
             search_box.clear()  # Clear search box in case of error
+            self.driver.find_element(By.CSS_SELECTOR, 'a[onclick="qryByStockId();"]').click()
             return False
         
     def get_all_screenshotable_stocks(self, user_id):
@@ -1037,6 +1058,7 @@ class TDCCAutomation:
             attempt = 0
             while(attempt < 3):  # Retry up to 3 times
                 attempt += 1
+                time.sleep(1)
                 if(self.capture_stock_screenshot(stock_id)==0): # success
                     self.vote_info_list[user_id].remove(stock_id)
                     self.write_vote_info_list()
@@ -1089,8 +1111,8 @@ class TDCCAutomation:
                     links = row.find_elements(By.TAG_NAME, 'a')
                     query_link = next((l for l in links if "查詢" in l.text), None)
                     if query_link:
-                        if "Y" in row.find_element(By.XPATH, './/td[4]').text:
-                            eGift = row.find_element(By.XPATH, './/td[4]').text.split("Y")[1].strip()
+                        if "Y" in row.find_element(By.XPATH, './/td[5]').text:
+                            eGift = row.find_element(By.XPATH, './/td[5]').text.split("Y")[1].strip()
                             logger.info(f"eGift electronic souvenir detected for stock {stock_id}. Will check inside before screenshot.")
                         query_link.click()
                         found = True
@@ -1117,7 +1139,7 @@ class TDCCAutomation:
                 votedate_pic = self.driver.find_element(By.CSS_SELECTOR,'div[class="u-width--100 u-t_align--right"]')
                 self.driver.set_window_size(516, votedate_pic.location['y']+votedate_pic.size['height']+370)
             except: #eGift cause votedate_pic not found, set to a reasonable default
-                self.driver.set_window_size(516, 400)
+                self.driver.set_window_size(516, 1000)
             ## scroll to top to avoid any unwanted content above
             for _ in range(5):
                 js="var q=document.documentElement.scrollTop=0"
@@ -1336,7 +1358,7 @@ class TDCCAutomation:
             #     if choice in ['y', 'n']:
             #         break
             #     print("Invalid choice. Please enter 'y' or 'n'.")
-            choice = 'y'   
+            choice = 'y'   # current change to force user complete screenshoot first(just apply style logic, don't let user choose, since unnecseeary), won't change anything
             if self.args.yes or choice == 'y':
                 self.open_browser()
                 for uid in list(sorted(self.vote_info_list.keys(), reverse=True)):  # sort by user id for consistent order
@@ -1354,9 +1376,10 @@ class TDCCAutomation:
                         # check does voting task finished? or just terminate unexpectedly but submitted
                         if self.login(uid.replace("_voting", "")):
                             # if voting is complete(indicated the lastest session is terminated unexpectedly but already submitted), move the stock id to screenshot list, otherwise just skip and wait for next time to continue voting
-                            if self.check_vote_complete(self.vote_info_list[uid])==True:
+                            if self.check_vote_completion(self.vote_info_list[uid])==True:
                                 logger.info(f"Voting task for user {uid} is already completed. Proceeding to screenshots.")
                                 self.vote_info_list[uid.replace("_voting", "")].append(self.vote_info_list[uid]) # move stock id to screenshot list
+                                self.vote_info_list.pop(uid) # remove the _voting key
                                 self.write_vote_info_list()
                             else:
                                 logger.info(f"Voting task for user {uid} is not completed. Skipping.")
